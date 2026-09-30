@@ -1,0 +1,18 @@
+# Never bake secrets or runtime data into the image
+.env
+.env.*
+!.env_example
+storage/
+logs/
+*.log
+
+# Not needed for the build
+.git/
+.github/
+.idea/
+.vscode/
+tmp/
+zz_*/
+Dockerfile
+.dockerignore
+docker-compose.yml

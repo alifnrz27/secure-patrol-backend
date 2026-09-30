@@ -1,6 +1,7 @@
 package main
 
 import (
+	stdlog "log"
 	"os"
 	"secure-patrol-backend/config"
 	"secure-patrol-backend/console"
@@ -18,9 +19,10 @@ func main() {
 	// initialize the logger
 	go InitDebutLogger()
 
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(".env file not found, using environment variables instead")
+	// .env is optional: in Docker the values can also come from the environment.
+	// Existing environment variables are never overridden by the file.
+	if err := godotenv.Load(); err != nil {
+		stdlog.Println(".env file not found, using environment variables")
 	}
 
 	config.ValidateSecurityEnv()
