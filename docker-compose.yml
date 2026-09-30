@@ -1,9 +1,10 @@
-# Secure Patrol backend. PostgreSQL already runs on the server; the frontend runs separately.
+# Secure Patrol backend + its own PostgreSQL. The frontend runs separately.
 #
 #   docker compose up -d --build                  start / rebuild and restart
 #   docker compose --profile redis up -d --build  also start Redis (needed for more than one backend container)
 #
 # All configuration comes from .env next to this file (see docs/DEPLOYMENT.md).
+# In .env, DB_HOST must be "secure-postgres".
 
 services:
   backend:
@@ -12,15 +13,37 @@ services:
     container_name: secure-backend
     restart: unless-stopped
     env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Only reachable from this server (nginx); not exposed to the internet.
     ports:
       - "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
     volumes:
       - backend-storage:/app/storage
       - backend-logs:/app/logs
-    # Lets DB_HOST = "host.docker.internal" reach PostgreSQL installed on this server.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: secure-postgres
+    restart: unless-stopped
+    # Same credentials as the backend uses (DB_* in .env).
+    environment:
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+      POSTGRES_USER: ${DB_USERNAME:?set DB_USERNAME in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      TZ: ${DB_TIMEZONE:-Asia/Jakarta}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # No published port: only containers of this project reach the database.
+    # To use a database tool from the server, uncomment (5433 avoids other PostgreSQL on 5432):
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   redis:
     image: redis:7-alpine
@@ -30,6 +53,8 @@ services:
 
 volumes:
   # Fixed names so the data survives a rename of the project folder.
+  postgres-data:
+    name: secure-postgres-data
   backend-storage:
     name: secure-backend-storage
   backend-logs:
