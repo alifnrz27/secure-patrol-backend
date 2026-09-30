@@ -100,6 +100,7 @@ func AuditLog(auditService service.AuditLogService) fiber.Handler {
 		if userID := helper.CurrentUserID(c); userID > 0 {
 			entry.UserID = &userID
 		}
+		entry.UnitID = helper.CurrentScope(c).UnitID
 		if appClientID := helper.CurrentAppClientID(c); appClientID > 0 {
 			entry.AppClientID = &appClientID
 		}

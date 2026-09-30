@@ -11,14 +11,10 @@ func PatrolShiftRoutes(app *fiber.App, handler *PatrolShiftHandler) {
 	app.Get("/patrol-shifts", handler.GetShifts)
 	app.Get("/patrol-shifts/:id", handler.GetShift)
 
-	// Shift settings are only managed from the web platform.
+	// Every unit has its own shifts, managed from the web by the unit's head
+	// and admin. The head office only views them.
 	webOnly := middleware.RequirePlatforms(models.PlatformWeb)
-	canManage := middleware.RequireRoles(
-		models.RoleSuperAdmin,
-		models.RoleSecurityManager,
-		models.RoleSecurityHead,
-		models.RoleSecurityAdmin,
-	)
+	canManage := middleware.RequireRoles(models.UnitManagerRoles...)
 
 	app.Post("/patrol-shifts", webOnly, canManage, handler.CreateShift)
 	app.Put("/patrol-shifts/:id", webOnly, canManage, handler.UpdateShift)

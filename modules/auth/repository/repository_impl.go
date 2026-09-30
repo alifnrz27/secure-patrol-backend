@@ -16,12 +16,12 @@ func NewAuthRepository(db *gorm.DB) AuthRepository {
 }
 
 func (r *repository) FindUserByEmail(email string) (user models.User, err error) {
-	err = r.db.Preload("Role").Where("email = ?", email).First(&user).Error
+	err = r.db.Preload("Role").Preload("Unit").Where("email = ?", email).First(&user).Error
 	return user, err
 }
 
 func (r *repository) FindUserByID(id int64) (user models.User, err error) {
-	err = r.db.Preload("Role").First(&user, id).Error
+	err = r.db.Preload("Role").Preload("Unit").First(&user, id).Error
 	return user, err
 }
 

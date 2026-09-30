@@ -11,13 +11,12 @@ var (
 	ErrReorderMismatch = errors.New("article_ids must contain every article of the category exactly once")
 )
 
-// ManagerRoles can manage the help desk and see unpublished (draft) articles.
-var ManagerRoles = []string{
-	models.RoleSuperAdmin,
-	models.RoleSecurityManager,
-	models.RoleSecurityHead,
-	models.RoleSecurityAdmin,
-}
+// EditorRoles write the help desk. It is shared by every unit, so only the
+// head office Super-Admin edits it.
+var EditorRoles = []string{models.RoleSuperAdmin}
+
+// DraftViewerRoles also see unpublished (draft) articles.
+var DraftViewerRoles = []string{models.RoleSuperAdmin, models.RoleSecurityManager}
 
 // Actor is the logged in user performing the request.
 type Actor struct {

@@ -8,6 +8,7 @@ import (
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/models"
 	"secure-patrol-backend/modules/patrol/dto"
+	"secure-patrol-backend/modules/patrol/repository"
 	"time"
 )
 
@@ -30,6 +31,10 @@ var (
 	ErrFaceMatchScoreTooLow  = errors.New("face match score is below the minimum required")
 	ErrExportTooLarge        = fmt.Errorf("export is limited to %d rows, narrow the filter (for example the date range)", MaxExportRows)
 	ErrDateRangeInvalid      = errors.New("date_from must not be after date_to")
+	ErrUnitRequired          = errors.New("unit_id is required")
+	ErrUnitNotFound          = errors.New("unit not found")
+	ErrScanNeedsUnit         = errors.New("only unit users can scan patrol points")
+	ErrPointOfOtherUnit      = errors.New("this patrol point belongs to another unit")
 )
 
 // LocationOutOfRangeError is returned when the officer is too far from the patrol point.
@@ -46,6 +51,12 @@ func (e *LocationOutOfRangeError) Error() string {
 type Actor struct {
 	UserID   int64
 	RoleCode string
+	// UnitID is the unit of a unit user; nil for head office users.
+	UnitID *int64
+}
+
+func (a Actor) scope() helper.Scope {
+	return helper.Scope{UserID: a.UserID, RoleCode: a.RoleCode, UnitID: a.UnitID}
 }
 
 // ScanInput is one NFC scan sent by the mobile app. ScannedAt is the moment
@@ -63,19 +74,25 @@ type ScanInput struct {
 	FaceMatchScore *float64
 	Photos         []*multipart.FileHeader
 	UserID         int64
-	AppClientID    int64
+	// UnitID is the unit of the officer; only points of this unit can be scanned.
+	UnitID      *int64
+	AppClientID int64
 }
 
+// Unit users only reach the groups, items and scans of their own unit; head
+// office users reach every unit and can filter on one.
 type PatrolService interface {
-	// EnsureGroupAt returns the patrol group containing t, creating it from the
-	// shift settings when it does not exist yet.
-	EnsureGroupAt(t time.Time) (models.PatrolGroup, error)
+	// EnsureGroupAt returns the unit's patrol group containing t, creating it
+	// from the unit's shift settings when it does not exist yet.
+	EnsureGroupAt(unitID int64, t time.Time) (models.PatrolGroup, error)
 	RunScheduler(ctx context.Context)
 
-	GetGroups(filter dto.GroupFilter) ([]models.PatrolGroup, int64, error)
-	GetGroup(id int64) (models.PatrolGroup, []models.PatrolListItem, error)
-	GetCurrentGroup() (models.PatrolGroup, []models.PatrolListItem, error)
-	GetItems(filter dto.ItemFilter) ([]models.PatrolListItem, int64, error)
+	GetGroups(actor Actor, filter dto.GroupFilter) ([]models.PatrolGroup, int64, error)
+	GetGroup(actor Actor, id int64) (models.PatrolGroup, []models.PatrolListItem, error)
+	// GetCurrentGroup returns the running group of the actor's unit; head office
+	// users pass the unit.
+	GetCurrentGroup(actor Actor, unitID int64) (models.PatrolGroup, []models.PatrolListItem, error)
+	GetItems(actor Actor, filter dto.ItemFilter) ([]models.PatrolListItem, int64, error)
 
 	// Scan records an NFC scan. duplicate is true when the same client_scan_id
 	// was already stored (e.g. an offline sync retry) and the stored scan is returned.
@@ -85,5 +102,5 @@ type PatrolService interface {
 	GetScanPhotoPath(actor Actor, scanID int64, photoID int64) (string, error)
 	// ExportScans returns the scans for the Excel export, oldest first.
 	ExportScans(actor Actor, filter dto.ScanFilter) ([]models.PatrolScan, error)
-	FilterNames(filter dto.ScanFilter) (shift, point, user string, err error)
+	FilterNames(filter dto.ScanFilter) (repository.FilterNames, error)
 }

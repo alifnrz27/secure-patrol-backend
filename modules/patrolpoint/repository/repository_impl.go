@@ -17,8 +17,12 @@ func NewPatrolPointRepository(db *gorm.DB) PatrolPointRepository {
 	return &repository{db: db}
 }
 
-func (r *repository) FindAll(pagination helper.Pagination) (points []models.PatrolPoint, total int64, err error) {
+func (r *repository) FindAll(pagination helper.Pagination, unitID int64) (points []models.PatrolPoint, total int64, err error) {
 	query := r.db.Model(&models.PatrolPoint{})
+
+	if unitID > 0 {
+		query = query.Where("unit_id = ?", unitID)
+	}
 
 	if pagination.Search != "" {
 		like := "%" + pagination.Search + "%"

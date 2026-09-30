@@ -43,6 +43,7 @@ func (h *AuditLogHandler) GetLogs(c *fiber.Ctx) error {
 	filter := dto.AuditLogFilter{
 		Pagination: helper.NewPagination(c),
 		UserID:     int64(c.QueryInt("user_id", 0)),
+		UnitID:     int64(c.QueryInt("unit_id", 0)),
 		Action:     action,
 		Resource:   c.Query("resource"),
 		DateFrom:   dateFrom,

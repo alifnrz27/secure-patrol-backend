@@ -101,6 +101,7 @@ func Route(db *gorm.DB) {
 	}))
 
 	routes.AuthRouter(api, db)
+	routes.UnitRouter(api, db)
 	routes.RoleRouter(api, db)
 	routes.UserRouter(api, db)
 	routes.AppClientRouter(api, db)

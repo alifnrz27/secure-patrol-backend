@@ -10,6 +10,7 @@ import (
 // identified on site by its NFC tag.
 type PatrolPoint struct {
 	ID                       int64          `json:"id" gorm:"primaryKey"`
+	UnitID                   int64          `json:"unit_id" gorm:"not null;default:0;index"`
 	Name                     string         `json:"name" gorm:"type:varchar(150);not null"`
 	Location                 string         `json:"location" gorm:"type:varchar(255);not null"`
 	NFCCode                  string         `json:"nfc_code" gorm:"column:nfc_code;type:varchar(100);uniqueIndex;not null"`

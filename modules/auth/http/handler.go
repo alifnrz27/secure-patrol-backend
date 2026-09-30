@@ -83,7 +83,7 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 
 // AppConfig returns the settings the mobile app needs (radius, limits, server time).
 func (h *AuthHandler) AppConfig(c *fiber.Ctx) error {
-	response := helper.APIResponse("Get app config success", http.StatusOK, "success", h.dto.ToAppConfigDTO())
+	response := helper.APIResponse("Get app config success", http.StatusOK, "success", h.dto.ToAppConfigDTO(helper.CurrentScope(c).UnitID))
 	return c.Status(http.StatusOK).JSON(response)
 }
 
@@ -167,7 +167,8 @@ func (h *AuthHandler) errorResponse(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrInvalidCredentials), errors.Is(err, service.ErrSessionInvalid):
 		code, message = http.StatusUnauthorized, err.Error()
-	case errors.Is(err, service.ErrAccountInactive), errors.Is(err, service.ErrPlatformNotAllowed):
+	case errors.Is(err, service.ErrAccountInactive), errors.Is(err, service.ErrPlatformNotAllowed),
+		errors.Is(err, service.ErrUnitInactive):
 		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrOldPasswordInvalid),
 		errors.Is(err, service.ErrSamePassword),

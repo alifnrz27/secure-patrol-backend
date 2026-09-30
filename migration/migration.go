@@ -9,6 +9,7 @@ import (
 
 func Migrate(db *gorm.DB) error {
 	migrationModels := []any{
+		&models.Unit{},
 		&models.Role{},
 		&models.User{},
 		&models.UserSession{},
@@ -30,7 +31,13 @@ func Migrate(db *gorm.DB) error {
 		}
 	}
 
-	return ensureCaseInsensitiveUniqueIndexes(db)
+	if err := ensureCaseInsensitiveUniqueIndexes(db); err != nil {
+		return err
+	}
+	if err := ensureSettingIndexes(db); err != nil {
+		return err
+	}
+	return assignLegacyDataToUnit(db)
 }
 
 // ensureCaseInsensitiveUniqueIndexes adds database level guarantees on top of the

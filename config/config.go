@@ -65,10 +65,6 @@ func Connect() *gorm.DB {
 		log.Fatal(err.Error())
 	}
 
-	if err := seeder.EnsureDefaultShifts(db); err != nil {
-		log.Fatal(err.Error())
-	}
-
 	// Adjustable settings live in the database; missing ones get their default.
 	settings := settingservice.NewSettingService(settingrepository.NewSettingRepository(db))
 	created, err := settings.EnsureDefaults()

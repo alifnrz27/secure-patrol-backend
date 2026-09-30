@@ -14,8 +14,12 @@ func NewPatrolShiftRepository(db *gorm.DB) PatrolShiftRepository {
 	return &repository{db: db}
 }
 
-func (r *repository) FindAll() (shifts []models.PatrolShift, err error) {
-	err = r.db.Order("start_time ASC, id ASC").Find(&shifts).Error
+func (r *repository) FindAll(unitID int64) (shifts []models.PatrolShift, err error) {
+	query := r.db
+	if unitID > 0 {
+		query = query.Where("unit_id = ?", unitID)
+	}
+	err = query.Order("unit_id ASC, start_time ASC, id ASC").Find(&shifts).Error
 	return shifts, err
 }
 

@@ -29,6 +29,11 @@ func (h *UserHandler) GetUsers(c *fiber.Ctx) error {
 	filter := dto.UserFilter{
 		Pagination: helper.NewPagination(c),
 		RoleID:     int64(c.QueryInt("role_id", 0)),
+		UnitID:     helper.UnitFilterFromQuery(c),
+	}
+	// ?head_office=true lists the head office users (no unit); head office users only.
+	if headOffice, _ := strconv.ParseBool(c.Query("head_office")); headOffice && helper.CurrentScope(c).IsCentral() {
+		filter.HeadOfficeOnly = true
 	}
 
 	if isActive, err := strconv.ParseBool(c.Query("is_active")); err == nil {
@@ -51,7 +56,7 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrUserNotFound)
 	}
 
-	user, err := h.service.GetUserByID(int64(id))
+	user, err := h.service.GetUserByID(actor(c), int64(id))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -84,6 +89,7 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 		Name:     req.Name,
 		Email:    req.Email,
 		RoleID:   req.RoleID,
+		UnitID:   optionalID(req.UnitID),
 		IsActive: isActive,
 	}, req.Password, facePhoto(c))
 	if err != nil {
@@ -117,6 +123,7 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		Name:     req.Name,
 		Email:    req.Email,
 		RoleID:   req.RoleID,
+		UnitID:   optionalID(req.UnitID),
 		IsActive: *req.IsActive,
 	}, facePhoto(c))
 	if err != nil {
@@ -172,7 +179,7 @@ func (h *UserHandler) GetFacePhoto(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrUserNotFound)
 	}
 
-	path, err := h.service.GetFacePhotoPath(int64(id))
+	path, err := h.service.GetFacePhotoPath(actor(c), int64(id))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -193,6 +200,8 @@ func (h *UserHandler) errorResponse(c *fiber.Ctx, err error) error {
 	case errors.Is(err, service.ErrForbiddenRole):
 		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrRoleInvalid),
+		errors.Is(err, service.ErrUnitRequired),
+		errors.Is(err, service.ErrUnitInvalid),
 		errors.Is(err, service.ErrFacePhotoRequired),
 		errors.Is(err, service.ErrCannotModifySelf),
 		errors.Is(err, helper.ErrFileTooLarge),
@@ -216,7 +225,15 @@ func actor(c *fiber.Ctx) service.Actor {
 	return service.Actor{
 		UserID:   helper.CurrentUserID(c),
 		RoleCode: helper.CurrentRoleCode(c),
+		UnitID:   helper.CurrentScope(c).UnitID,
 	}
+}
+
+func optionalID(id int64) *int64 {
+	if id <= 0 {
+		return nil
+	}
+	return &id
 }
 
 func facePhoto(c *fiber.Ctx) *multipart.FileHeader {

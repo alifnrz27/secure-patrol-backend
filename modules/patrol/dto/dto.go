@@ -36,6 +36,8 @@ func groupStatus(group models.PatrolGroup, now time.Time) string {
 func groupSummary(group models.PatrolGroup) GroupSummaryDTO {
 	return GroupSummaryDTO{
 		ID:        group.ID,
+		UnitID:    group.UnitID,
+		UnitName:  group.UnitName,
 		ShiftID:   group.PatrolShiftID,
 		ShiftName: group.ShiftName,
 		ShiftDate: group.ShiftDate.Format("2006-01-02"),
@@ -54,6 +56,7 @@ func userSummary(user *models.User) *UserSummaryDTO {
 func (d *dto) ToGroupDTO(group models.PatrolGroup) PatrolGroupDTO {
 	return PatrolGroupDTO{
 		ID:        group.ID,
+		Unit:      UnitSummaryDTO{ID: group.UnitID, Code: group.UnitCode, Name: group.UnitName},
 		Shift:     ShiftSummaryDTO{ID: group.PatrolShiftID, Name: group.ShiftName},
 		ShiftDate: group.ShiftDate.Format("2006-01-02"),
 		StartAt:   group.StartAt,

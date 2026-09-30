@@ -16,6 +16,7 @@ func NewPatrolPointDto() PatrolPointDto {
 func (d *dto) ToPatrolPointDTO(point models.PatrolPoint) PatrolPointDTO {
 	return PatrolPointDTO{
 		ID:                       point.ID,
+		UnitID:                   point.UnitID,
 		Name:                     point.Name,
 		Location:                 point.Location,
 		NFCCode:                  point.NFCCode,

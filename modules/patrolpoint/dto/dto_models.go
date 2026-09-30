@@ -4,6 +4,7 @@ import "time"
 
 type PatrolPointDTO struct {
 	ID                       int64     `json:"id"`
+	UnitID                   int64     `json:"unit_id"`
 	Name                     string    `json:"name"`
 	Location                 string    `json:"location"`
 	NFCCode                  string    `json:"nfc_code"`

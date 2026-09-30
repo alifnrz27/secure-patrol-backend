@@ -20,7 +20,7 @@ func NewHelpDeskService(repo repository.HelpDeskRepository) HelpDeskService {
 }
 
 func canSeeDrafts(actor Actor) bool {
-	return helper.Includes(ManagerRoles, actor.RoleCode)
+	return helper.Includes(DraftViewerRoles, actor.RoleCode)
 }
 
 func (s *service) GetArticles(actor Actor, filter dto.ArticleFilter) ([]models.HelpDeskArticle, int64, error) {

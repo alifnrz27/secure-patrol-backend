@@ -2,6 +2,7 @@ package routes
 
 import (
 	rolerepository "secure-patrol-backend/modules/role/repository"
+	unitrepository "secure-patrol-backend/modules/unit/repository"
 	"secure-patrol-backend/modules/user/dto"
 	"secure-patrol-backend/modules/user/http"
 	"secure-patrol-backend/modules/user/repository"
@@ -15,7 +16,9 @@ func UserRouter(app *fiber.App, db *gorm.DB) {
 	userRepo := repository.NewUserRepository(db)
 	roleRepo := rolerepository.NewRoleRepository(db)
 
-	userService := service.NewUserService(userRepo, roleRepo)
+	unitRepo := unitrepository.NewUnitRepository(db)
+
+	userService := service.NewUserService(userRepo, roleRepo, unitRepo)
 	userDto := dto.NewUserDto()
 	userHandler := http.NewUserHandler(userService, userDto)
 

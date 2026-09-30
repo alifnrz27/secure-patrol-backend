@@ -104,8 +104,8 @@ docker compose up -d --build
 ```
 
 Compose menjalankan `secure-postgres` lebih dulu, menunggu database siap, baru menjalankan `secure-backend`.
-Saat pertama kali jalan, database dan tabel dibuat otomatis (migrasi), begitu juga 3 shift default dan pengaturan
-sistem dengan nilai default. Cek:
+Saat pertama kali jalan, database dan tabel dibuat otomatis (migrasi), begitu juga pengaturan sistem global dengan
+nilai default. Shift dibuat per unit: setiap unit baru otomatis mendapat 3 shift default. Cek:
 
 ```bash
 docker compose ps                           # keduanya "running (healthy)"
@@ -125,8 +125,13 @@ docker compose exec backend /app/secure-patrol-backend create-app-client -name "
 docker compose exec backend /app/secure-patrol-backend create-app-client -name "Secure Patrol iOS" -platform ios
 ```
 
-App ID/Key web dipakai frontend, Android/iOS dipakai aplikasi mobile. Setelah itu user, titik patroli, shift, dan
-pengaturan dikelola dari web admin.
+App ID/Key web dipakai frontend, Android/iOS dipakai aplikasi mobile.
+
+Selanjutnya dari web admin:
+
+1. Super-Admin membuat **unit** (menu Unit). Setiap unit baru otomatis mendapat 3 shift default.
+2. Super-Admin membuat Kepala/Admin Keamanan untuk setiap unit (pilih unitnya), serta Manager Keamanan (pusat).
+3. Kepala/Admin Keamanan mengatur titik patroli, shift, petugas, dan setting unitnya sendiri.
 
 ## 6. nginx dan HTTPS
 
@@ -184,6 +189,11 @@ Semua perintah dijalankan di `/opt/secure-patrol-backend`.
 - `docker compose down` dan build ulang **tidak** menghapus data (database dan foto ada di volume).
   **Jangan** memakai `docker compose down -v`: itu menghapus database, foto, dan log.
 - Migrasi database berjalan otomatis saat backend start. **Backup database sebelum update** (bagian 9).
+- **Update ke versi multi unit:** data lama (titik patroli, shift, group patroli, dan user Kepala/Admin/Tim
+  Keamanan) otomatis dimasukkan ke unit pertama, atau ke unit baru **"Unit Utama"** (`UNIT-UTAMA`) jika belum
+  ada unit. Koordinat unit diambil dari titik patroli pertama. Setelah update, cek dan ubah nama, kode, dan lokasi
+  unit tersebut dari menu Unit. Pengaturan sistem yang sudah diubah tetap dipakai sebagai nilai global. Cek log:
+  `docker compose logs backend | grep -E "unit|assigned"`.
 - Compose ini hanya mengurus Secure Patrol. Frontend dan aplikasi lain di server ini (termasuk database mereka)
   tidak tersentuh.
 

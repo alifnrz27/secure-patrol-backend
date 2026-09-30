@@ -10,6 +10,7 @@ var (
 	ErrInvalidCredentials = errors.New("email or password is incorrect")
 	ErrAccountLocked      = errors.New("account is temporarily locked because of too many failed login attempts")
 	ErrAccountInactive    = errors.New("account is inactive")
+	ErrUnitInactive       = errors.New("your unit is inactive, contact the head office")
 	ErrPlatformNotAllowed = errors.New("your role is not allowed to sign in on this platform")
 	ErrSessionInvalid     = errors.New("session is invalid or expired, please login again")
 	ErrTokenAppMismatch   = errors.New("token was not issued for this app")
@@ -48,6 +49,17 @@ type Principal struct {
 	UserID    int64
 	RoleCode  string
 	SessionID string
+	// UnitID is the unit of a unit user; nil for head office users.
+	UnitID *int64
+}
+
+// UnitIsUsable reports whether the user may work: head office users always can,
+// unit users only while their unit exists and is active.
+func UnitIsUsable(user models.User) bool {
+	if models.IsCentralRole(user.Role.Code) {
+		return true
+	}
+	return user.UnitID != nil && user.Unit != nil && user.Unit.IsActive
 }
 
 type AuthService interface {

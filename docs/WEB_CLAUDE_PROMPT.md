@@ -29,6 +29,7 @@ dari web dengan 403).
 | Titik per Shift/Periode | Daftar titik dari group yang dipilih dengan status sudah/belum di-scan |
 | Riwayat Scan | Tabel dengan filter lengkap, detail scan (foto, peta, jarak, validasi), ekspor CSV |
 | Laporan | Tingkat penyelesaian per hari per shift dan temuan tidak normal untuk rentang tanggal, grafik, ekspor CSV |
+| Unit | Master data unit: kode, nama, lokasi di peta, status aktif (Super-Admin) |
 | Titik Patroli | CRUD dengan pemilih lokasi di peta |
 | Pengaturan Shift | CRUD dengan visualisasi timeline 24 jam |
 | Pengguna | CRUD, upload foto wajah, reset password, aktif/nonaktif |
@@ -158,9 +159,10 @@ perbarui offset dari header `Date` response tersebut lalu ulangi **sekali**.
 | 401 `meta.message = "Unauthorized app"` | Masalah App ID/Key, jam, atau nonce. Jam → koreksi & ulang sekali; nonce → ulang dengan nonce baru; lainnya → tampilkan "Konfigurasi aplikasi tidak valid". **Jangan logout** |
 | 401 `meta.message = "Unauthorized"`, `data = "Token is expired"` | Refresh (5.2) lalu ulangi request |
 | 401 `"Unauthorized"` dengan `data` lain | Coba refresh sekali; gagal → sesi berakhir, arahkan ke login |
-| 403 | Tampilkan halaman/notifikasi "Anda tidak memiliki akses" |
+| 403 `your unit is inactive, contact the head office` | Unit user dinonaktifkan: akhiri sesi, kembali ke login dengan pesan "Unit Anda sedang dinonaktifkan, hubungi pusat" |
+| 403 lainnya | Tampilkan halaman/notifikasi "Anda tidak memiliki akses" |
 | 404 | "Data tidak ditemukan" |
-| 409 | Konflik data (email/kode NFC/kode role sudah dipakai, shift tumpang tindih) — tampilkan pada field terkait |
+| 409 | Konflik data (email/kode NFC/kode role/kode unit sudah dipakai, shift tumpang tindih, unit masih berisi data) — tampilkan pada field terkait |
 | 413 | Body > 20 MB |
 | 422 | Validasi / aturan bisnis — petakan ke field form jika bisa, jika tidak tampilkan `meta.message` |
 | 429 | Akun terkunci 5 menit setelah 3 kali salah password (login). Tampilkan hitung mundur dari `data.retry_after_seconds` (juga header `Retry-After`); `data.locked_until` berisi waktu terbuka |
@@ -179,7 +181,8 @@ Foto wajah adalah data biometrik: jangan simpan di localStorage atau cache persi
 ### 5.1 Login — `POST /api/v1/auth/login`
 
 Request `{"email", "password"}` (trim email). Response berisi `access_token`, `expires_at`, `refresh_token`,
-`user` (termasuk `role.code`, `face_photo_base64`, `face_photo_mime_type`), dan `config`:
+`user` (termasuk `role.code`, `unit_id`, `unit` — `null` untuk user pusat —, `face_photo_base64`,
+`face_photo_mime_type`), `settings` (sesuai unit user), dan `config`:
 
 ```json
 "config": {
@@ -195,7 +198,8 @@ Request `{"email", "password"}` (trim email). Response berisi `access_token`, `e
 ```
 
 - Tampilkan avatar dari `face_photo_base64` (`data:{mime};base64,...`), hanya di memori.
-- Error: 401 `email or password is incorrect`, 403 `account is inactive`, 429 akun terkunci, 422 validasi.
+- Error: 401 `email or password is incorrect`, 403 `account is inactive`, 403 `your unit is inactive, contact the
+  head office`, 429 akun terkunci, 422 validasi.
 - **Web hanya untuk Super-Admin, Manager Keamanan, Kepala Keamanan, dan Admin Keamanan.** Role lain (Tim Keamanan
   dan role kustom) ditolak server dengan 403 `your role is not allowed to sign in on this platform` — tampilkan
   "Akun Anda hanya dapat digunakan melalui aplikasi mobile." Jika pesan yang sama muncul pada request lain atau saat
@@ -227,30 +231,49 @@ Request `{"email", "password"}` (trim email). Response berisi `access_token`, `e
 | `POST /api/v1/auth/logout-all` | "Keluar dari semua perangkat" di Profil |
 | `PUT /api/v1/auth/change-password` | `{"old_password","password","password_confirmation"}`; perangkat lain otomatis logout, sesi ini tetap |
 
-## 6. Hak akses & menu
+## 6. Unit, hak akses & menu
 
-Role dari `user.role.code`. Hanya empat role berikut yang bisa login di web (bagian 5.1). Tampilkan menu dan
-tombol sesuai tabel ini; tetap tangani 403 dari server.
+**Pusat dan unit.** Role dari `user.role.code`, unit dari `user.unit` (`null` = user pusat).
 
-| Fitur | super_admin | security_manager | security_admin | security_head |
-|---|---|---|---|---|
-| Dashboard, Monitoring, Titik per Shift, Riwayat Scan, Laporan | ✓ | ✓ | ✓ | ✓ |
-| Titik Patroli: lihat, tambah/ubah/hapus | ✓ | ✓ | ✓ | ✓ |
-| Pengaturan Shift: lihat & kelola | ✓ | ✓ | ✓ | ✓ |
-| Pengguna (semua aksi) | ✓ | ✓ | ✓ | |
-| Role: lihat | ✓ | ✓ | ✓ | |
-| Role: tambah/ubah/hapus | ✓ | | | |
-| App Client | ✓ | | | |
-| Audit Log | ✓ | ✓ | | |
-| Pengaturan Sistem: lihat | ✓ | ✓ | ✓ | ✓ |
-| Pengaturan Sistem: ubah | ✓ | | | |
-| Help Desk: baca (termasuk draft), kelola & urutkan | ✓ | ✓ | ✓ | ✓ |
-| Profil & ganti password | ✓ | ✓ | ✓ | ✓ |
+- **User pusat** (`super_admin`, `security_manager`) melihat data **semua unit**. Tampilkan **pemilih unit** global di
+  header ("Semua unit" + daftar dari `GET /api/v1/units?limit=100`) dan kirim sebagai `unit_id` ke endpoint daftar:
+  users, patrol-points, patrol-shifts, patrol-groups, patrol-list-items, patrol-scans, export, settings, audit-logs.
+  Tampilkan kolom **Unit** di tabel saat "Semua unit" dipilih. Dashboard pusat: ringkasan per unit (group berjalan
+  setiap unit via `GET /api/v1/patrol-groups/current?unit_id=`), lalu drill-down ke satu unit.
+- **User unit** (`security_head`, `security_admin`) hanya melihat unitnya. Sembunyikan pemilih unit; tampilkan
+  nama unit di header. Server mengabaikan `unit_id` dari mereka.
+- **Manager Keamanan hanya memantau**: semua halaman dalam mode baca.
+- Kepala Keamanan dan Admin Keamanan saat ini punya hak yang sama, tetapi tetap role berbeda.
+
+Hanya empat role berikut yang bisa login di web (bagian 5.1). Tampilkan menu dan tombol sesuai tabel ini; tetap
+tangani 403 dari server.
+
+| Fitur | super_admin | security_manager | security_head / security_admin |
+|---|---|---|---|
+| Dashboard, Monitoring, Titik per Shift, Riwayat Scan, Laporan, Export | semua unit | semua unit | unit sendiri |
+| Unit: lihat | ✓ | ✓ | unit sendiri |
+| Unit: tambah/ubah/nonaktifkan/hapus | ✓ | | |
+| Titik Patroli: lihat | semua unit | semua unit | unit sendiri |
+| Titik Patroli: tambah/ubah/hapus | | | ✓ |
+| Pengaturan Shift: lihat | semua unit | semua unit | unit sendiri |
+| Pengaturan Shift: kelola | | | ✓ |
+| Pengguna: lihat | semua | semua | unit sendiri |
+| Pengguna: tambah/ubah/hapus/reset password | ✓ (termasuk user pusat) | | ✓ (role unit, unit sendiri) |
+| Role: lihat | ✓ | ✓ | ✓ |
+| Role: tambah/ubah/hapus | ✓ | | |
+| App Client | ✓ | | |
+| Audit Log | ✓ | ✓ | |
+| Pengaturan Sistem: lihat | global / per unit | global / per unit | unit sendiri |
+| Pengaturan Sistem: ubah | nilai global | | nilai unit sendiri |
+| Help Desk: baca termasuk draft | ✓ | ✓ | terbit saja |
+| Help Desk: kelola & urutkan | ✓ | | |
+| Profil & ganti password | ✓ | ✓ | ✓ |
 
 Aturan tambahan dari server:
 
-- Hanya Super-Admin yang bisa membuat/mengubah/menghapus user ber-role Super-Admin dan memilih role tersebut
-  (sembunyikan opsinya untuk role lain; server menjawab 403 `you are not allowed to manage users with this role`).
+- Hanya Super-Admin yang bisa membuat/mengubah/menghapus user pusat (Super-Admin, Manager Keamanan) dan memilih role
+  tersebut (sembunyikan opsinya untuk role lain; server menjawab 403 `you are not allowed to manage users with this role`).
+- Data unit lain dijawab 404 untuk user unit.
 - User tidak bisa menghapus, menonaktifkan, atau mengganti role akunnya sendiri (422) — nonaktifkan kontrolnya.
 - App Client yang sedang dipakai web tidak bisa dihapus/dinonaktifkan (422) — bandingkan `app_id` dengan `VITE_APP_ID`.
 - Role sistem (`is_system = true`) tidak bisa dihapus/dinonaktifkan; kode role tidak bisa diubah.
@@ -268,7 +291,8 @@ Aturan tambahan dari server:
 
 ## 8. Dashboard
 
-- `GET /api/v1/patrol-groups/current` → group berjalan beserta `items`. Contoh item:
+- `GET /api/v1/patrol-groups/current` → group berjalan unit user beserta `items`. User pusat wajib menambahkan
+  `?unit_id=` (tanpa itu 422 `unit_id is required`). Contoh item:
 
   ```json
   {
@@ -281,7 +305,7 @@ Aturan tambahan dari server:
   }
   ```
 
-  Group juga berisi `shift`, `shift_date`, `start_at`, `end_at`, `status` (`upcoming`/`ongoing`/`finished`), dan
+  Group juga berisi `unit` (`id`, `code`, `name`), `shift`, `shift_date`, `start_at`, `end_at`, `status` (`upcoming`/`ongoing`/`finished`), dan
   `progress` (`total_points`, `scanned_points`, `unscanned_points`, `total_scans`, `abnormal_scans`).
 - Tampilkan: kartu ringkasan (shift, sisa waktu, progres %, temuan tidak normal), tabel titik dengan status
   terakhir (Belum di-scan / Normal / Tidak Normal, waktu dan petugas), dan **peta** titik dengan warna status
@@ -313,16 +337,15 @@ Detail `GET /api/v1/patrol-scans/{id}` dalam drawer:
 - `scanned_at` (waktu di HP) dan `received_at` (waktu diterima server); tandai "Dikirim offline" jika selisihnya
   lebih dari 5 menit.
 
-Filter `scanned_by` butuh daftar petugas dari `GET /api/v1/users`, yang hanya boleh diakses Super-Admin,
-Manager, dan Admin Keamanan. Untuk Kepala Keamanan, sembunyikan filter petugas (keterbatasan backend saat ini;
-masukkan ke laporan akhir sebagai permintaan ke backend).
+Filter `scanned_by` memakai daftar petugas dari `GET /api/v1/users` (semua role web bisa membacanya; user unit
+otomatis hanya mendapat petugas unitnya). Semua endpoint di bagian ini menerima `unit_id` untuk user pusat.
 
 **Ekspor Excel** — tombol "Export Excel" membuka dialog filter: **Shift**, **Titik**, **Petugas**, **Tanggal shift
 dari** dan **sampai** (isian awal mengikuti filter halaman). Unduh lewat
 `GET /api/v1/patrol-scans/export?shift_id=&patrol_point_id=&scanned_by=&date_from=&date_to=` menggunakan `apiFetch`
 (butuh signature dan token, jadi tidak bisa memakai link biasa): ambil sebagai blob, lalu simpan dengan nama dari
-header `Content-Disposition`. File `.xlsx` berisi sheet "Riwayat Scan" (kolom Waktu scan, Diterima server, Dikirim
-offline, Tanggal shift, Shift, Titik, Lokasi, Kondisi, Catatan, Petugas, Email petugas) dan sheet "Filter". Tampilkan
+header `Content-Disposition`. User pusat juga bisa memilih **Unit** (`unit_id`). File `.xlsx` berisi sheet
+"Riwayat Scan" (kolom Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Unit, Shift, Titik, Lokasi, Kondisi, Catatan, Petugas, Email petugas) dan sheet "Filter". Tampilkan
 loading selama unduhan. Error 422: `date_from must not be after date_to` atau
 `export is limited to 50000 rows, narrow the filter (for example the date range)`.
 
@@ -332,9 +355,21 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
 
 ## 10. Master data
 
+### 10.0 Unit — `/api/v1/units`
+
+- Daftar: `GET ?page=&limit=&search=&is_active=`. Kolom: kode, nama, status, `users_count`, `patrol_points_count`.
+  User unit hanya mendapat unitnya sendiri.
+- Form (Super-Admin, JSON): `code` (wajib, maks 20, disimpan huruf besar, unik), `name` (wajib, maks 150),
+  `latitude`, `longitude` (wajib; pilih di peta), `is_active` (default true saat create, wajib saat update).
+- Unit baru otomatis mendapat 3 shift default (Kepala/Admin unit mengubahnya).
+- **Nonaktifkan** unit: dialog peringatan "Semua pengguna unit ini akan langsung keluar dan tidak bisa login".
+- Hapus: hanya unit kosong; 409 `unit still has users or patrol points, move or delete them first` → sarankan
+  menonaktifkan. 409 `unit code is already used by another unit` → error di field `code`.
+
 ### 10.1 Titik Patroli — `/api/v1/patrol-points`
 
-- Daftar: `GET ?page=&limit=&search=` (search nama, lokasi, kode NFC).
+- Daftar: `GET ?page=&limit=&search=&unit_id=` (search nama, lokasi, kode NFC). Tambah/ubah/hapus hanya untuk
+  Kepala/Admin Keamanan; titik otomatis masuk ke unit mereka. Pusat hanya melihat.
 - Form (JSON):
 
   | Field | Aturan |
@@ -349,25 +384,33 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
 
 - **Pemilih lokasi**: peta dengan marker yang bisa digeser, input koordinat manual, dan lingkaran radius
   `config.location_radius_meters` sebagai pratinjau area scan yang diterima.
-- 409 `nfc code is already used by another patrol point` → error pada field `nfc_code`.
+- 409 `nfc code is already used by another patrol point` → error pada field `nfc_code` (kode NFC unik di semua unit).
+- Posisi awal peta untuk titik baru: koordinat unit (`user.unit.latitude/longitude`).
 - `PUT` mengirim semua field; `DELETE` soft delete. Titik baru otomatis masuk ke daftar patroli shift yang
   sedang berjalan; perubahan tidak mengubah history shift yang sudah selesai.
 
 ### 10.2 Pengaturan Shift — `/api/v1/patrol-shifts`
 
-- `GET` mengembalikan array (tanpa paginasi), urut jam mulai. Field: `name`, `start_time`, `end_time`,
-  `duration_minutes`, `crosses_midnight`, `is_active`.
+- `GET ?unit_id=` mengembalikan array (tanpa paginasi), urut unit lalu jam mulai. Field: `unit_id`, `name`,
+  `start_time`, `end_time`, `duration_minutes`, `crosses_midnight`, `is_active`.
+- Setiap unit punya shift sendiri. Kelola hanya untuk Kepala/Admin Keamanan (shift dibuat di unitnya); pusat
+  melihat saja (pilih unit untuk melihat timeline-nya).
 - Form: `name` (wajib, maks 100), `start_time` dan `end_time` format `HH:MM` (`end_time` boleh `24:00`;
   jam akhir lebih kecil dari jam mulai berarti melewati tengah malam), `is_active`.
 - Jelaskan di UI: **jam akhir adalah batas (cut-off)** — scan tepat di jam akhir masuk shift berikutnya; perubahan
   hanya berlaku untuk shift berikutnya.
 - Tampilkan **timeline 24 jam** semua shift aktif agar celah dan tumpang tindih terlihat.
-- 409 `patrol shift overlaps with another active shift: <nama> (<mulai>-<selesai>)`; 422 untuk format jam.
+- 409 `patrol shift overlaps with another active shift: <nama> (<mulai>-<selesai>)` (dicek dalam satu unit); 422 untuk format jam.
 
 ### 10.3 Pengguna — `/api/v1/users`
 
-- Daftar: `GET ?page=&limit=&search=&role_id=&is_active=` (search nama/email). Kolom: foto, nama, email, role,
-  status aktif, terkunci (`is_locked`), login terakhir.
+- Daftar: `GET ?page=&limit=&search=&role_id=&is_active=&unit_id=&head_office=` (search nama/email;
+  `head_office=true` = hanya user pusat, untuk user pusat). Kolom: foto, nama, email, role, unit, status aktif,
+  terkunci (`is_locked`), login terakhir.
+- **Unit di form**: untuk Super-Admin, tampilkan pilihan `unit_id` jika role yang dipilih adalah role unit (wajib,
+  422 `unit_id is required for this role`); sembunyikan untuk role pusat. Untuk Kepala/Admin Keamanan, jangan tampilkan
+  pilihan unit (user selalu dibuat di unitnya) dan sembunyikan role pusat dari pilihan role. Memindahkan user ke unit
+  lain (hanya Super-Admin) mengakhiri semua sesinya.
 - **Tambah** (`POST`, **multipart**): `name` (wajib, maks 150), `email` (wajib, unik), `password`,
   `password_confirmation` (8–72 karakter, minimal satu huruf dan satu angka), `role_id`, `face_photo`
   (**wajib**, JPEG/PNG, **maks 5 MB**; cek ukuran dan tipe sebelum upload; tampilkan pratinjau), `is_active` (opsional).
@@ -389,11 +432,13 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
   | `face photo could not be read as an image` | File foto rusak atau tidak bisa dibaca. |
 
 - Error: 409 `email is already registered`; 422 `face photo is required`, `role not found or inactive`,
+  `unit_id is required for this role`, `unit not found`,
   `file size must not exceed 5 MB`, `file must be a JPEG or PNG image`,
   `you cannot delete, deactivate or change the role of your own account`; 403 untuk user Super-Admin.
 
 ### 10.4 Role — `/api/v1/roles`
 
+- Role berlaku untuk semua unit. Semua role web bisa membaca (untuk form pengguna); hanya Super-Admin yang mengelola.
 - Daftar berhalaman. Form tambah: `code` (wajib, 3–50 karakter, huruf kecil/angka/underscore, diawali huruf;
   tidak bisa diubah), `name` (wajib, maks 100), `description` (maks 255), `is_active`. Ubah: `name`,
   `description`, `is_active` (wajib).
@@ -416,7 +461,8 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
 ### 10.6 Help Desk — `/api/v1/help-desk-articles`
 
 - Tab **Aturan / Tata Cara / FAQ** (`category=rule|guide|faq`), pencarian, dan filter terbit/draft
-  (`is_published=true|false`, hanya untuk role manajemen). Urutan dari server sudah final; jangan diurutkan ulang.
+  (`is_published=true|false`, hanya untuk Super-Admin dan Manager Keamanan). Help desk berlaku untuk semua unit
+  dan **hanya dikelola Super-Admin**; role lain membaca artikel terbit saja. Urutan dari server sudah final; jangan diurutkan ulang.
 - Form: `category`, `title` (maks 200), `content` (Markdown, maks 20.000), `is_published`, `sort_order` (opsional;
   kosong = paling akhir). Editor dengan tab **Tulis / Pratinjau**; pratinjau memakai renderer yang sama dengan tampilan baca.
 - Render Markdown dengan `react-markdown` + `remark-gfm` **tanpa** `rehype-raw` dan tanpa `dangerouslySetInnerHTML`.
@@ -425,26 +471,32 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
   Daftar harus memuat **semua** artikel kategori itu, termasuk draft — ambil daftar lengkap (`limit=100`, tanpa
   filter pencarian/status) sebelum mengizinkan drag. Terapkan urutan secara optimistic dan kembalikan jika server
   menjawab 422 `article_ids must contain every article of the category exactly once`.
-- Draft ditandai jelas ("Draft") dan tidak terlihat oleh Tim Keamanan.
+- Draft ditandai jelas ("Draft") dan hanya terlihat oleh Super-Admin dan Manager Keamanan.
 
 ### 10.7 Audit Log — `GET /api/v1/audit-logs` (Super-Admin, Manager Keamanan)
 
 - Hanya-baca; server mencatat otomatis setiap create/update/delete yang berhasil (tidak termasuk login/logout).
-- Filter: `user_id`, `action` (`create`/`update`/`delete`), `resource` (mis. `users`, `patrol-points`,
+- Filter: `user_id`, `unit_id` (perubahan oleh user unit tersebut), `action` (`create`/`update`/`delete`), `resource` (mis. `users`, `patrol-points`,
   `help-desk-articles`, `app-clients`, `patrol-scans`), `date_from`, `date_to`, `search` (path, IP, atau ID data).
 - Kolom: waktu, pengguna (`user.name`, `user.email`, `user.role_code`; `null` untuk aksi dari CLI dengan
   `source = "cli"`), aksi (badge warna), `endpoint` (mis. `PUT /users/:id`), `resource_id`, `ip_address`,
-  `app_platform`, dan `user_agent` di detail.
+  `app_platform`, `unit_id` (unit pelaku; `null` = pusat/CLI), dan `user_agent` di detail.
 
 ### 10.8 Pengaturan Sistem — `/api/v1/settings`
 
-- `GET` mengembalikan array setting: `key`, `group` (`patrol`/`face`/`security`), `type` (`integer`/`number`/`boolean`),
-  `value`, `default_value`, `is_default`, `min`, `max`, `unit`, `description`, `updated_by`, `updated_at`.
+- `GET` mengembalikan array setting: `key`, `level` (`global`/`unit`), `group` (`patrol`/`face`/`security`),
+  `type` (`integer`/`number`/`boolean`), `value`, `default_value`, `is_default`, `global_value`, `is_inherited`,
+  `min`, `max`, `unit`, `description`, `updated_by`, `updated_at`.
+- **Setting per unit.** Super-Admin mengubah **nilai global** (dipakai semua unit yang tidak punya nilai sendiri);
+  pusat bisa melihat setting sebuah unit dengan `?unit_id=` (baca saja). Kepala/Admin Keamanan mengubah **nilai
+  unitnya**; tampilkan badge "Mengikuti pusat" jika `is_inherited`, nilai pusat (`global_value`) sebagai
+  pembanding, dan tombol **Ikuti nilai pusat** (kirim `null`).
 - Tampilkan per grup dengan label Bahasa Indonesia, input sesuai `type` (switch untuk boolean) dan batas
   `min`/`max`, penanda "diubah dari default", dan tombol **Kembalikan ke default** per baris.
-- Simpan dengan `PUT` `{"values": {"patrol_location_radius_meters": 150}}` (hanya yang berubah; `null` = default).
+- Simpan dengan `PUT` `{"values": {"patrol_location_radius_meters": 150}}` (hanya yang berubah; `null` = default
+  untuk nilai global, atau kembali mengikuti pusat untuk nilai unit).
   Semua atau tidak sama sekali: 422 berisi daftar pesan per setting.
-- Hanya Super-Admin yang bisa mengubah; role lain melihat halaman dalam mode baca.
+- Manager Keamanan melihat halaman dalam mode baca.
 - Setelah menyimpan `access_token_ttl_minutes` atau `refresh_token_ttl_days`, nilai baru berlaku untuk login berikutnya.
 
 ## 11. Profil
@@ -472,6 +524,9 @@ konfirmasi sama, berbeda dari password lama; 422 `old password is incorrect`), d
 - [ ] Dua tab terbuka, token kedaluwarsa bersamaan → hanya satu refresh, kedua tab tetap login.
 - [ ] Jam komputer dimajukan 10 menit → request tetap berhasil (offset jam bekerja).
 - [ ] Menu dan tombol sesuai role pada tabel bagian 6 (uji dengan keempat role manajemen dari seed).
+- [ ] Pemilih unit untuk user pusat memfilter semua halaman; user unit tidak melihat data unit lain.
+- [ ] Unit dinonaktifkan → user unit tersebut langsung keluar dengan pesan unit nonaktif.
+- [ ] Setting unit: ubah radius unit, lalu "Ikuti nilai pusat" mengembalikan ke nilai global.
 - [ ] Login `tim@securepatrol.local` di web ditolak dengan pesan "Akun Anda hanya dapat digunakan melalui aplikasi mobile."
 - [ ] Tambah **dan ubah** user dengan foto 5 MB berhasil di Chrome, Firefox, dan Safari; foto > 5 MB atau bukan
       gambar ditolak sebelum upload.
@@ -489,8 +544,8 @@ konfirmasi sama, berbeda dari password lama; 422 `old password is incorrect`), d
 
 1. Setup project, konfigurasi env, `apiFetch` (signing, offset jam, envelope, error) + unit test test vector.
 2. Login, sesi, refresh lintas tab, layout, menu berdasarkan role, halaman 403/404.
-3. Dashboard.
-4. Titik Patroli (dengan peta) dan Pengaturan Shift.
+3. Dashboard (per unit dan ringkasan pusat), pemilih unit.
+4. Unit, Titik Patroli (dengan peta), dan Pengaturan Shift.
 5. Pengguna dan Role.
 6. Monitoring, Titik per Shift/Periode, Riwayat Scan (detail, ekspor), Laporan.
 7. Help Desk (editor, reorder) dan Profil.
@@ -501,8 +556,7 @@ konfirmasi sama, berbeda dari password lama; 422 `old password is incorrect`), d
 
 Laporkan: stack dan library, struktur folder, cara menjalankan (dev/build) dan menguji, hasil setiap kriteria di
 bagian 13, keputusan yang kamu ambil sendiri, serta **permintaan ke backend** (endpoint/field yang dibutuhkan,
-alasannya, dan contoh request/response). Setidaknya sertakan kebutuhan filter petugas untuk Kepala Keamanan
-(bagian 9) jika fitur itu diinginkan.
+alasannya, dan contoh request/response).
 
 ## Lampiran: data uji di environment development
 
@@ -511,11 +565,11 @@ atau dari log saat seeding):
 
 | Email | Role |
 |---|---|
-| `superadmin@securepatrol.local` | Super-Admin |
-| `manager@securepatrol.local` | Manager Keamanan |
-| `kepala@securepatrol.local` | Kepala Keamanan |
-| `admin@securepatrol.local` | Admin Keamanan |
-| `tim@securepatrol.local` | Tim Keamanan (**tidak bisa login di web** — untuk menguji penolakan) |
+| `superadmin@securepatrol.local` | Super-Admin (pusat) |
+| `manager@securepatrol.local` | Manager Keamanan (pusat) |
+| `kepala@securepatrol.local` | Kepala Keamanan, Unit Utama |
+| `admin@securepatrol.local` | Admin Keamanan, Unit Utama |
+| `tim@securepatrol.local` | Tim Keamanan, Unit Utama (**tidak bisa login di web** — untuk menguji penolakan) |
 
-Juga tersedia 3 shift default, 3 titik patroli contoh (`DUMMY-NFC-0001` s.d. `0003`), dan 10 artikel help desk.
+Juga tersedia unit **Unit Utama** (`UNIT-UTAMA`) dengan 3 shift default, 3 titik patroli contoh (`DUMMY-NFC-0001` s.d. `0003`), dan 10 artikel help desk.
 Data scan hanya bisa dibuat dari aplikasi mobile (atau lewat App Client `android`/`ios` di halaman `/docs`).

@@ -24,7 +24,7 @@ func NewPatrolPointHandler(service service.PatrolPointService, dto dto.PatrolPoi
 func (h *PatrolPointHandler) GetPatrolPoints(c *fiber.Ctx) error {
 	pagination := helper.NewPagination(c)
 
-	points, total, err := h.service.GetPatrolPoints(pagination)
+	points, total, err := h.service.GetPatrolPoints(helper.CurrentScope(c), pagination, int64(c.QueryInt("unit_id", 0)))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -40,7 +40,7 @@ func (h *PatrolPointHandler) GetPatrolPoint(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrPatrolPointNotFound)
 	}
 
-	point, err := h.service.GetPatrolPointByID(int64(id))
+	point, err := h.service.GetPatrolPointByID(helper.CurrentScope(c), int64(id))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -57,7 +57,7 @@ func (h *PatrolPointHandler) GetPatrolPointByNFC(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnprocessableEntity).JSON(response)
 	}
 
-	point, err := h.service.GetPatrolPointByNFCCode(code)
+	point, err := h.service.GetPatrolPointByNFCCode(helper.CurrentScope(c), code)
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -78,7 +78,7 @@ func (h *PatrolPointHandler) CreatePatrolPoint(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnprocessableEntity).JSON(response)
 	}
 
-	point, err := h.service.CreatePatrolPoint(models.PatrolPoint{
+	point, err := h.service.CreatePatrolPoint(helper.CurrentScope(c), models.PatrolPoint{
 		Name:                     req.Name,
 		Location:                 req.Location,
 		NFCCode:                  req.NFCCode,
@@ -86,7 +86,7 @@ func (h *PatrolPointHandler) CreatePatrolPoint(c *fiber.Ctx) error {
 		Longitude:                *req.Longitude,
 		IsLocationMatchRequired:  req.IsLocationMatchRequired != nil && *req.IsLocationMatchRequired,
 		IsFaceValidationRequired: req.IsFaceValidationRequired != nil && *req.IsFaceValidationRequired,
-	}, helper.CurrentUserID(c))
+	})
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -112,7 +112,7 @@ func (h *PatrolPointHandler) UpdatePatrolPoint(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnprocessableEntity).JSON(response)
 	}
 
-	point, err := h.service.UpdatePatrolPoint(int64(id), models.PatrolPoint{
+	point, err := h.service.UpdatePatrolPoint(helper.CurrentScope(c), int64(id), models.PatrolPoint{
 		Name:                     req.Name,
 		Location:                 req.Location,
 		NFCCode:                  req.NFCCode,
@@ -120,7 +120,7 @@ func (h *PatrolPointHandler) UpdatePatrolPoint(c *fiber.Ctx) error {
 		Longitude:                *req.Longitude,
 		IsLocationMatchRequired:  *req.IsLocationMatchRequired,
 		IsFaceValidationRequired: *req.IsFaceValidationRequired,
-	}, helper.CurrentUserID(c))
+	})
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -135,7 +135,7 @@ func (h *PatrolPointHandler) DeletePatrolPoint(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrPatrolPointNotFound)
 	}
 
-	if err := h.service.DeletePatrolPoint(int64(id)); err != nil {
+	if err := h.service.DeletePatrolPoint(helper.CurrentScope(c), int64(id)); err != nil {
 		return h.errorResponse(c, err)
 	}
 
@@ -150,6 +150,8 @@ func (h *PatrolPointHandler) errorResponse(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrPatrolPointNotFound):
 		code, message = http.StatusNotFound, err.Error()
+	case errors.Is(err, service.ErrUnitRequired):
+		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrNFCCodeTaken):
 		code, message = http.StatusConflict, err.Error()
 	default:

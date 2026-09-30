@@ -36,6 +36,20 @@ info:
 
     Sebaliknya, `POST /patrol-scans` **hanya bisa dari platform `android` atau `ios`**.
 
+    ## Unit (multi unit)
+    - **Pusat**: Super-Admin (admin pusat) dan Manager Keamanan tidak punya unit (`unit_id` = `null`) dan melihat
+      data **semua unit**. Endpoint daftar menerima filter `unit_id`. Manager Keamanan hanya memantau (baca saja).
+    - **Unit**: Kepala Keamanan, Admin Keamanan, Tim Keamanan (dan role custom) wajib punya satu unit dan hanya
+      melihat data unitnya sendiri. Filter `unit_id` diabaikan untuk mereka; data unit lain dijawab `404`.
+    - Patrol point, shift, dan user unit dikelola oleh **Kepala/Admin Keamanan** unit tersebut. Pusat tidak bisa
+      membuat/mengubah patrol point dan shift. Master unit, role, app client, help desk, dan setting global
+      dikelola Super-Admin.
+    - Setting berlaku per unit: nilai global dari Super-Admin dipakai semua unit, kecuali unit mengisi nilainya
+      sendiri. Login, refresh, `/auth/me`, dan `/app-config` memakai setting unit user tersebut.
+    - Unit yang dinonaktifkan: semua user unit itu tidak bisa login dan token yang sudah ada langsung ditolak
+      (`403 your unit is inactive, contact the head office`).
+    - Kode NFC unik di **semua unit**.
+
     ## Penghapusan data
     Semua endpoint `DELETE` melakukan **soft delete**: data disembunyikan dari API tetapi tetap tersimpan di
     database (kolom `deleted_at`). Nilai unik milik data yang dihapus (email user, kode NFC, kode role) dilepas
@@ -48,6 +62,8 @@ servers:
 tags:
   - name: Auth
     description: Login, token, dan profil user yang sedang login
+  - name: Units
+    description: Master data unit (Super-Admin)
   - name: Roles
     description: Manajemen role
   - name: Users
@@ -82,7 +98,8 @@ paths:
       description: |
         Akun terkunci setelah `login_max_failed_attempts` kali salah password berturut-turut (default 3) selama
         `login_lock_minutes` menit (default 5); keduanya diatur di `/settings`. Response 429 berisi `data.locked_until`,
-        `data.retry_after_seconds`, dan header `Retry-After`. Response berisi `settings` (7 setting untuk aplikasi).
+        `data.retry_after_seconds`, dan header `Retry-After`. Response berisi `settings` (7 setting untuk aplikasi,
+        sesuai unit user) dan `user.unit` (null untuk user pusat). User unit yang unitnya nonaktif mendapat 403.
         Response login menyertakan foto wajah user dalam base64 (`user.face_photo_base64` dan
         `user.face_photo_mime_type`). Pada `/auth/refresh` kedua field ini selalu `null`.
       security:
@@ -102,7 +119,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { description: 'Akun tidak aktif, atau role tidak boleh login di platform App Client ini (misalnya Tim Keamanan di web)', content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '403': { description: 'Akun tidak aktif, unit user tidak aktif, atau role tidak boleh login di platform App Client ini (misalnya Tim Keamanan di web)', content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '422': { $ref: '#/components/responses/ValidationError' }
         '429': { description: Akun terkunci sementara, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
 
@@ -212,12 +229,119 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /units:
+    get:
+      operationId: listUnits
+      tags: [Units]
+      summary: Daftar unit
+      description: 'Semua user yang login, semua platform. User unit hanya melihat unitnya sendiri.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: is_active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Daftar unit, diurutkan berdasarkan nama
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Unit' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createUnit
+      tags: [Units]
+      summary: Tambah unit
+      description: |
+        **Hanya platform web.** Akses: Super-Admin. Kode unit disimpan dalam huruf besar dan harus unik.
+        Unit baru otomatis mendapat 3 shift default (08:00-16:00, 16:00-24:00, 00:00-08:00) yang bisa diubah unit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUnitRequest' }
+      responses:
+        '201':
+          description: Unit dibuat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnitResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /units/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getUnit
+      tags: [Units]
+      summary: Detail unit
+      description: 'User unit hanya bisa membuka unitnya sendiri (unit lain 404).'
+      responses:
+        '200':
+          description: Detail unit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnitResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateUnit
+      tags: [Units]
+      summary: Ubah unit
+      description: |
+        **Hanya platform web.** Akses: Super-Admin.
+        `is_active: false` membuat semua user unit ini tidak bisa login dan token yang sudah ada langsung ditolak.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUnitRequest' }
+      responses:
+        '200':
+          description: Unit diubah
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnitResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      operationId: deleteUnit
+      tags: [Units]
+      summary: Hapus unit (soft delete)
+      description: |
+        **Hanya platform web.** Akses: Super-Admin. Hanya unit tanpa user dan patrol point yang bisa dihapus
+        (`409` jika masih ada). Untuk menutup unit sementara, nonaktifkan saja. Kode unit bisa dipakai lagi.
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /roles:
     get:
       operationId: listRoles
       tags: [Roles]
       summary: Daftar role
-      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Admin Keamanan.'
+      description: '**Hanya platform web.** Akses baca: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan (untuk form user). Role berlaku untuk semua unit dan hanya diubah Super-Admin.'
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
@@ -322,11 +446,16 @@ paths:
       operationId: listUsers
       tags: [Users]
       summary: Daftar user
-      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Admin Keamanan.'
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan (semua unit); Kepala Keamanan, Admin Keamanan (unitnya sendiri).'
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/UnitId'
+        - name: head_office
+          in: query
+          description: '`true` = hanya user pusat (tanpa unit). Hanya untuk user pusat.'
+          schema: { type: boolean }
         - name: role_id
           in: query
           schema: { type: integer, format: int64 }
@@ -358,8 +487,11 @@ paths:
       summary: Tambah user
       description: |
         **Hanya platform web.**
-        Akses: Super-Admin, Manager Keamanan, Admin Keamanan.
-        Hanya Super-Admin yang bisa membuat user dengan role Super-Admin.
+        Akses: Super-Admin, Kepala Keamanan, Admin Keamanan. Manager Keamanan hanya memantau.
+        - Role pusat (Super-Admin, Manager Keamanan) hanya bisa diberikan Super-Admin dan tidak punya unit
+          (`unit_id` diabaikan).
+        - Role unit wajib punya unit. Super-Admin wajib mengisi `unit_id` (`422 unit_id is required for this role`);
+          Kepala/Admin Keamanan selalu membuat user di unitnya sendiri.
         Foto wajah wajib, JPEG/PNG maksimal 5 MB, dan diperiksa server sebelum disimpan: harus berisi **tepat satu
         wajah**, cukup besar (minimal 20% sisi pendek foto), dan **menghadap kamera** dengan kedua mata terlihat.
         Orientasi EXIF foto HP diperhitungkan.
@@ -408,8 +540,9 @@ paths:
         **Hanya platform web.**
         Foto wajah opsional; jika dikirim, foto diperiksa seperti saat membuat user dan foto lama diganti.
         Jika foto ditolak, tidak ada data yang berubah.
-        Menonaktifkan user atau mengganti role-nya langsung mematikan semua session user tersebut.
-        User tidak bisa menonaktifkan atau mengganti role akunnya sendiri.
+        Menonaktifkan user, mengganti role, atau memindahkan unit-nya langsung mematikan semua session user tersebut.
+        User tidak bisa menonaktifkan, mengganti role, atau memindahkan unit akunnya sendiri.
+        `unit_id` kosong = tetap di unit sekarang. Hanya Super-Admin yang bisa memindahkan user ke unit lain.
       requestBody:
         required: true
         content:
@@ -612,11 +745,12 @@ paths:
       operationId: listPatrolPoints
       tags: [Patrol Points]
       summary: Daftar patrol point
-      description: 'Semua user yang login, semua platform. Search mencari di nama, lokasi, dan kode NFC.'
+      description: 'Semua user yang login, semua platform. User unit hanya melihat titik unitnya. Search mencari di nama, lokasi, dan kode NFC.'
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/UnitId'
       responses:
         '200':
           description: Daftar patrol point, diurutkan berdasarkan nama
@@ -640,8 +774,8 @@ paths:
       tags: [Patrol Points]
       summary: Tambah patrol point
       description: |
-        **Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.
-        Kode NFC disimpan dalam huruf besar dan harus unik.
+        **Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan. Titik dibuat di unit user tersebut.
+        Kode NFC disimpan dalam huruf besar dan harus unik di semua unit.
       requestBody:
         required: true
         content:
@@ -665,7 +799,7 @@ paths:
       operationId: getPatrolPointByNfc
       tags: [Patrol Points]
       summary: Cari patrol point dari tag NFC yang dipindai
-      description: 'Semua user yang login, semua platform. Pencarian tidak membedakan huruf besar/kecil.'
+      description: 'Semua user yang login, semua platform. Pencarian tidak membedakan huruf besar/kecil. Titik milik unit lain dijawab 404.'
       parameters:
         - name: code
           in: query
@@ -704,7 +838,7 @@ paths:
       operationId: updatePatrolPoint
       tags: [Patrol Points]
       summary: Ubah patrol point
-      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.'
+      description: '**Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan (titik unitnya sendiri).'
       requestBody:
         required: true
         content:
@@ -727,7 +861,7 @@ paths:
       operationId: deletePatrolPoint
       tags: [Patrol Points]
       summary: Hapus patrol point (soft delete)
-      description: '**Hanya platform web.** Kode NFC patrol point yang dihapus bisa dipakai lagi.'
+      description: '**Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan. Kode NFC patrol point yang dihapus bisa dipakai lagi.'
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -739,7 +873,9 @@ paths:
       operationId: listPatrolShifts
       tags: [Patrol Shifts]
       summary: Daftar pengaturan shift
-      description: 'Semua user yang login, semua platform. Diurutkan berdasarkan jam mulai.'
+      description: 'Semua user yang login, semua platform. Setiap unit punya shift sendiri; user unit hanya melihat shift unitnya. Diurutkan berdasarkan unit dan jam mulai.'
+      parameters:
+        - $ref: '#/components/parameters/UnitId'
       responses:
         '200':
           description: Daftar shift
@@ -759,9 +895,10 @@ paths:
       tags: [Patrol Shifts]
       summary: Tambah shift
       description: |
-        **Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.
+        **Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan; shift dibuat di unit user tersebut.
+        Pusat tidak mengatur shift (`403`). Unit baru otomatis mendapat 3 shift default.
         Jam akhir adalah batas (cut-off): scan tepat di jam akhir atau sesudahnya masuk ke shift berikutnya.
-        Shift aktif tidak boleh tumpang tindih. Perubahan hanya berlaku untuk group berikutnya.
+        Shift aktif dalam satu unit tidak boleh tumpang tindih. Perubahan hanya berlaku untuk group berikutnya.
       requestBody:
         required: true
         content:
@@ -797,7 +934,7 @@ paths:
       operationId: updatePatrolShift
       tags: [Patrol Shifts]
       summary: Ubah shift
-      description: '**Hanya platform web.** Group yang sudah dibuat tetap memakai jam lamanya.'
+      description: '**Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan (shift unitnya sendiri). Group yang sudah dibuat tetap memakai jam lamanya.'
       requestBody:
         required: true
         content:
@@ -818,7 +955,7 @@ paths:
       operationId: deletePatrolShift
       tags: [Patrol Shifts]
       summary: Hapus shift (soft delete)
-      description: '**Hanya platform web.** History group dan scan dari shift ini tetap tersimpan.'
+      description: '**Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan. History group dan scan dari shift ini tetap tersimpan.'
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -830,10 +967,11 @@ paths:
       operationId: listPatrolGroups
       tags: [Patrol Groups]
       summary: Daftar group patroli (per shift per tanggal) beserta progres
-      description: 'Semua user yang login, semua platform. Group dibuat otomatis saat shift dimulai.'
+      description: 'Semua user yang login, semua platform. Group dibuat otomatis per unit saat shift unit tersebut dimulai.'
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UnitId'
         - $ref: '#/components/parameters/ShiftId'
         - $ref: '#/components/parameters/DateFrom'
         - $ref: '#/components/parameters/DateTo'
@@ -862,7 +1000,11 @@ paths:
       operationId: getCurrentPatrolGroup
       tags: [Patrol Groups]
       summary: Group yang sedang berjalan beserta daftar patroli
-      description: 'Untuk layar utama aplikasi mobile. Mengembalikan 422 jika tidak ada shift aktif saat ini.'
+      description: |
+        Untuk layar utama aplikasi mobile: group unit user yang sedang berjalan. User pusat wajib mengisi
+        `unit_id` (`422 unit_id is required`). Mengembalikan 422 jika tidak ada shift aktif saat ini.
+      parameters:
+        - $ref: '#/components/parameters/UnitId'
       responses:
         '200':
           description: Group saat ini
@@ -870,6 +1012,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PatrolGroupDetailResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /patrol-groups/{id}:
@@ -898,6 +1041,7 @@ paths:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/UnitId'
         - name: group_id
           in: query
           schema: { type: integer, format: int64 }
@@ -934,6 +1078,8 @@ paths:
       summary: Scan NFC titik patroli
       description: |
         **Hanya platform android/ios.** Satu NFC boleh di-scan berkali-kali dalam shift yang sama.
+        Hanya user unit yang bisa scan, dan hanya titik milik unitnya (`403 this patrol point belongs to another unit`;
+        user pusat `403 only unit users can scan patrol points`). Radius dan setting lain memakai setting unit.
 
         - Shift ditentukan dari `scanned_at` (waktu scan di HP), sehingga scan offline yang dikirim belakangan
           tetap masuk ke shift yang benar. Maksimal setting `patrol_max_offline_hours` (default 24 jam) ke belakang.
@@ -982,10 +1128,11 @@ paths:
       summary: History scan (per group, shift, periode, atau semua)
       description: |
         Tanpa filter mengembalikan seluruh history. Tim Keamanan hanya melihat scan miliknya sendiri;
-        role lain melihat semua. Diurutkan dari scan terbaru.
+        Kepala/Admin Keamanan melihat semua scan unitnya; pusat melihat semua unit. Diurutkan dari scan terbaru.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/UnitId'
         - name: group_id
           in: query
           schema: { type: integer, format: int64 }
@@ -1028,11 +1175,12 @@ paths:
       summary: Export Excel riwayat scan
       description: |
         **Hanya platform web.** Menghasilkan file `.xlsx` dengan sheet **Riwayat Scan** dan **Filter**.
-        Kolom: Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Shift, Titik, Lokasi, Kondisi, Catatan,
-        Petugas, Email petugas. Waktu ditulis sebagai tanggal Excel dalam zona waktu aplikasi (WIB), diurutkan dari
+        Kolom: Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Unit, Shift, Titik, Lokasi, Kondisi, Catatan,
+        Petugas, Email petugas. User unit hanya mengekspor data unitnya. Waktu ditulis sebagai tanggal Excel dalam zona waktu aplikasi (WIB), diurutkan dari
         scan terlama. "Dikirim offline" = Ya jika diterima server lebih dari 5 menit setelah waktu scan.
         Maksimal 50.000 baris per file.
       parameters:
+        - $ref: '#/components/parameters/UnitId'
         - $ref: '#/components/parameters/ShiftId'
         - name: patrol_point_id
           in: query
@@ -1099,7 +1247,8 @@ paths:
       summary: Daftar artikel help desk (aturan, tata cara, FAQ)
       description: |
         Semua user yang login, semua platform. Diurutkan: `rule`, `guide`, lalu `faq`, kemudian `sort_order`.
-        Tim Keamanan hanya melihat artikel yang sudah dipublikasikan; role manajemen juga melihat draft.
+        Help desk berlaku untuk semua unit. Super-Admin dan Manager Keamanan juga melihat draft; role lain hanya
+        artikel yang sudah dipublikasikan.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
@@ -1133,7 +1282,7 @@ paths:
       operationId: createHelpDeskArticle
       tags: [Help Desk]
       summary: Tambah artikel
-      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.'
+      description: '**Hanya platform web.** Akses: Super-Admin (help desk dikelola pusat).'
       requestBody:
         required: true
         content:
@@ -1155,7 +1304,7 @@ paths:
       tags: [Help Desk]
       summary: Atur ulang urutan artikel dalam satu kategori
       description: |
-        **Hanya platform web.** Untuk drag & drop di menu help desk. Kirim **semua** artikel kategori tersebut
+        **Hanya platform web.** Akses: Super-Admin. Untuk drag & drop di menu help desk. Kirim **semua** artikel kategori tersebut
         (termasuk draft) dalam urutan baru; `sort_order` disusun ulang menjadi 1, 2, 3, dan seterusnya.
         Daftar yang tidak lengkap, berisi ID ganda, atau berisi artikel dari kategori lain ditolak (422).
       requestBody:
@@ -1187,7 +1336,7 @@ paths:
       operationId: getHelpDeskArticle
       tags: [Help Desk]
       summary: Detail artikel
-      description: 'Draft mengembalikan 404 untuk Tim Keamanan.'
+      description: 'Draft mengembalikan 404 selain untuk Super-Admin dan Manager Keamanan.'
       responses:
         '200':
           description: Detail artikel
@@ -1246,6 +1395,10 @@ paths:
         - name: user_id
           in: query
           schema: { type: integer, format: int64 }
+        - name: unit_id
+          in: query
+          description: Hanya perubahan oleh user unit ini
+          schema: { type: integer, format: int64 }
         - name: action
           in: query
           schema: { type: string, enum: [create, update, delete] }
@@ -1283,6 +1436,10 @@ paths:
       description: |
         **Hanya platform web.** Akses baca: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.
         Berisi nilai saat ini, nilai default, tipe, dan batas setiap setting.
+        User unit melihat setting unitnya (`level` = `unit`). User pusat melihat setting global, atau setting
+        sebuah unit dengan `?unit_id=`.
+      parameters:
+        - $ref: '#/components/parameters/UnitId'
       responses:
         '200':
           description: Semua setting
@@ -1291,14 +1448,18 @@ paths:
               schema: { $ref: '#/components/schemas/SettingsResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     put:
       operationId: updateSettings
       tags: [Settings]
       summary: Ubah pengaturan sistem
       description: |
-        **Hanya platform web.** Akses: Super-Admin. Ubah satu atau beberapa setting sekaligus; perubahan langsung
-        berlaku tanpa restart dan tercatat di audit log. Nilai `null` mengembalikan setting ke default.
-        Jika satu nilai tidak valid, tidak ada yang disimpan.
+        **Hanya platform web.** Ubah satu atau beberapa setting sekaligus; perubahan langsung berlaku tanpa restart
+        dan tercatat di audit log. Jika satu nilai tidak valid, tidak ada yang disimpan.
+        - **Super-Admin** mengubah nilai **global** (dipakai semua unit yang tidak mengisi nilai sendiri).
+          `null` = kembali ke default.
+        - **Kepala/Admin Keamanan** mengubah nilai **unitnya**. `null` = unit kembali mengikuti nilai global.
+        - Manager Keamanan hanya membaca.
       requestBody:
         required: true
         content:
@@ -1363,6 +1524,11 @@ components:
       name: search
       in: query
       schema: { type: string }
+    UnitId:
+      name: unit_id
+      in: query
+      description: Filter unit, hanya untuk user pusat (Super-Admin, Manager Keamanan). Diabaikan untuk user unit.
+      schema: { type: integer, format: int64 }
     ShiftId:
       name: shift_id
       in: query
@@ -1475,6 +1641,52 @@ components:
         total: { type: integer, example: 42 }
         total_pages: { type: integer, example: 5 }
 
+    UnitSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        code: { type: string, example: UNIT-UTAMA }
+        name: { type: string, example: Unit Utama }
+        latitude: { type: number, format: double, example: -6.2250138 }
+        longitude: { type: number, format: double, example: 106.8008324 }
+        is_active: { type: boolean, example: true }
+    Unit:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        code: { type: string, example: UNIT-UTAMA }
+        name: { type: string, example: Unit Utama }
+        latitude: { type: number, format: double, example: -6.2250138 }
+        longitude: { type: number, format: double, example: 106.8008324 }
+        is_active: { type: boolean, example: true, description: Unit nonaktif = semua user unit tidak bisa login }
+        users_count: { type: integer, example: 12 }
+        patrol_points_count: { type: integer, example: 15 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UnitResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/Unit' }
+    CreateUnitRequest:
+      type: object
+      required: [code, name, latitude, longitude]
+      properties:
+        code: { type: string, maxLength: 20, example: JKT-01 }
+        name: { type: string, maxLength: 150, example: Unit Jakarta 1 }
+        latitude: { type: number, format: double, minimum: -90, maximum: 90 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180 }
+        is_active: { type: boolean, default: true }
+    UpdateUnitRequest:
+      type: object
+      required: [code, name, latitude, longitude, is_active]
+      properties:
+        code: { type: string, maxLength: 20 }
+        name: { type: string, maxLength: 150 }
+        latitude: { type: number, format: double, minimum: -90, maximum: 90 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180 }
+        is_active: { type: boolean }
     Role:
       type: object
       properties:
@@ -1523,6 +1735,13 @@ components:
             id: { type: integer, format: int64, example: 5 }
             code: { type: string, example: security_team }
             name: { type: string, example: Tim Keamanan }
+        unit_id: { type: integer, format: int64, nullable: true, example: 1, description: null untuk user pusat }
+        unit:
+          type: object
+          nullable: true
+          description: Unit user; null untuk user pusat
+          allOf:
+            - $ref: '#/components/schemas/UnitSummary'
         is_active: { type: boolean, example: true }
         is_locked: { type: boolean, example: false, description: Terkunci karena terlalu banyak salah password }
         face_photo_url: { type: string, nullable: true, example: /api/v1/users/6/face-photo }
@@ -1552,6 +1771,7 @@ components:
           description: 8-72 karakter, minimal satu huruf dan satu angka
         password_confirmation: { type: string, format: password }
         role_id: { type: integer, format: int64 }
+        unit_id: { type: integer, format: int64, description: 'Wajib untuk role unit jika dibuat Super-Admin. Diabaikan untuk role pusat dan jika dibuat Kepala/Admin Keamanan.' }
         face_photo: { type: string, format: binary, description: 'Wajib. JPEG/PNG, maksimal 5 MB (5.242.880 byte)' }
         is_active: { type: boolean, default: true }
     UpdateUserRequest:
@@ -1561,6 +1781,7 @@ components:
         name: { type: string, maxLength: 150 }
         email: { type: string, format: email }
         role_id: { type: integer, format: int64 }
+        unit_id: { type: integer, format: int64, description: 'Opsional. Kosong = tetap di unit sekarang.' }
         is_active: { type: boolean }
         face_photo: { type: string, format: binary, description: 'Opsional. JPEG/PNG, maksimal 5 MB' }
     ResetPasswordRequest:
@@ -1700,6 +1921,7 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64, example: 1 }
+        unit_id: { type: integer, format: int64, example: 1 }
         name: { type: string, example: Main Gate }
         location: { type: string, example: Building A - Front Entrance }
         nfc_code: { type: string, example: '04:A2:1F:9C' }
@@ -1746,6 +1968,7 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64, example: 1 }
+        unit_id: { type: integer, format: int64, example: 1 }
         name: { type: string, example: Shift 1 }
         start_time: { type: string, example: '08:00' }
         end_time: { type: string, example: '16:00', description: 'Batas akhir (cut-off). 24:00 diperbolehkan.' }
@@ -1781,6 +2004,8 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64 }
+        unit_id: { type: integer, format: int64 }
+        unit_name: { type: string, example: Unit Utama }
         shift_id: { type: integer, format: int64 }
         shift_name: { type: string, example: Shift 1 }
         shift_date: { type: string, format: date, example: '2026-09-29' }
@@ -1790,6 +2015,12 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64 }
+        unit:
+          type: object
+          properties:
+            id: { type: integer, format: int64 }
+            code: { type: string, example: UNIT-UTAMA }
+            name: { type: string, example: Unit Utama }
         shift:
           type: object
           properties:
@@ -1962,6 +2193,7 @@ components:
         action: { type: string, enum: [create, update, delete] }
         resource: { type: string, example: patrol-points }
         resource_id: { type: string, nullable: true, example: '12' }
+        unit_id: { type: integer, format: int64, nullable: true, description: Unit user yang melakukan perubahan; null untuk pusat dan CLI }
         endpoint: { type: string, example: 'PUT /patrol-points/:id' }
         method: { type: string, example: PUT }
         path: { type: string, example: /api/v1/patrol-points/12 }
@@ -2006,11 +2238,14 @@ components:
       type: object
       properties:
         key: { type: string, example: patrol_location_radius_meters }
+        level: { type: string, enum: [global, unit], description: Level daftar ini }
         group: { type: string, enum: [patrol, face, security] }
         type: { type: string, enum: [integer, number, boolean] }
         value: { description: Nilai saat ini (number atau boolean), example: 100 }
         default_value: { description: Nilai default, example: 100 }
         is_default: { type: boolean }
+        global_value: { description: Nilai global dari pusat, example: 100 }
+        is_inherited: { type: boolean, description: 'true jika unit belum mengisi nilai sendiri dan mengikuti nilai global (selalu false untuk level global)' }
         min: { type: number, nullable: true, example: 1 }
         max: { type: number, nullable: true, example: 10000 }
         unit: { type: string, example: meters }

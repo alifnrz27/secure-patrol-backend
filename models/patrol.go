@@ -16,6 +16,7 @@ const (
 // The end time is the cut-off: a scan at or after it belongs to the next shift.
 type PatrolShift struct {
 	ID        int64          `json:"id" gorm:"primaryKey"`
+	UnitID    int64          `json:"unit_id" gorm:"not null;default:0;index"`
 	Name      string         `json:"name" gorm:"type:varchar(100);not null"`
 	StartTime string         `json:"start_time" gorm:"type:varchar(5);not null"` // HH:MM
 	EndTime   string         `json:"end_time" gorm:"type:varchar(5);not null"`   // HH:MM, 24:00 allowed
@@ -31,6 +32,7 @@ type PatrolShift struct {
 // end are copied from the shift, so later shift changes do not alter history.
 type PatrolGroup struct {
 	ID            int64          `json:"id" gorm:"primaryKey"`
+	UnitID        int64          `json:"unit_id" gorm:"not null;default:0;index"`
 	PatrolShiftID int64          `json:"patrol_shift_id" gorm:"not null;uniqueIndex:idx_patrol_groups_shift_date"`
 	PatrolShift   PatrolShift    `json:"-" gorm:"foreignKey:PatrolShiftID"`
 	ShiftName     string         `json:"shift_name" gorm:"type:varchar(100);not null"`
@@ -46,6 +48,9 @@ type PatrolGroup struct {
 	ScannedPoints int64 `json:"-" gorm:"->;-:migration"`
 	TotalScans    int64 `json:"-" gorm:"->;-:migration"`
 	AbnormalScans int64 `json:"-" gorm:"->;-:migration"`
+	// Unit, filled by queries only.
+	UnitCode string `json:"-" gorm:"->;-:migration"`
+	UnitName string `json:"-" gorm:"->;-:migration"`
 }
 
 // PatrolListItem is a copy of a patrol point inside a patrol group (the patrol list).

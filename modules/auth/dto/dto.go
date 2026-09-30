@@ -14,7 +14,8 @@ type AuthDto interface {
 	ToTokenDTO(pair service.TokenPair) TokenDTO
 	// ToLoginTokenDTO also embeds the user's face photo as base64.
 	ToLoginTokenDTO(pair service.TokenPair) TokenDTO
-	ToAppConfigDTO() AppConfigDTO
+	// ToAppConfigDTO uses the settings of the unit (nil = global settings).
+	ToAppConfigDTO(unitID *int64) AppConfigDTO
 	ToProfileDTO(user models.User) ProfileDTO
 }
 
@@ -35,20 +36,20 @@ func (d *dto) ToTokenDTO(pair service.TokenPair) TokenDTO {
 		RefreshToken:     pair.RefreshToken,
 		RefreshExpiresAt: pair.RefreshExpiresAt,
 		User:             LoginUserDTO{UserDTO: d.userDto.ToUserDTO(pair.User)},
-		Config:           d.ToAppConfigDTO(),
-		Settings:         settingservice.Current().PublicMap(),
+		Config:           d.ToAppConfigDTO(pair.User.UnitID),
+		Settings:         settingservice.ForUnit(pair.User.UnitID).PublicMap(),
 	}
 }
 
 func (d *dto) ToProfileDTO(user models.User) ProfileDTO {
 	return ProfileDTO{
 		UserDTO:  d.userDto.ToUserDTO(user),
-		Settings: settingservice.Current().PublicMap(),
+		Settings: settingservice.ForUnit(user.UnitID).PublicMap(),
 	}
 }
 
-func (d *dto) ToAppConfigDTO() AppConfigDTO {
-	settings := settingservice.Current()
+func (d *dto) ToAppConfigDTO(unitID *int64) AppConfigDTO {
+	settings := settingservice.ForUnit(unitID)
 	var minScore *float64
 	if score := settings.FaceMatchMinScore; score > 0 {
 		minScore = &score

@@ -40,6 +40,7 @@ func (d *dto) ToAuditLogDTOs(logs []models.AuditLog) []AuditLogDTO {
 			Action:      log.Action,
 			Resource:    log.Resource,
 			ResourceID:  log.ResourceID,
+			UnitID:      log.UnitID,
 			Endpoint:    log.Endpoint,
 			Method:      log.Method,
 			Path:        log.Path,

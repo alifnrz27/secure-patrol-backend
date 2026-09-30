@@ -50,12 +50,13 @@ func (h *PatrolHandler) GetGroups(c *fiber.Ctx) error {
 
 	filter := dto.GroupFilter{
 		Pagination: helper.NewPagination(c),
+		UnitID:     helper.UnitFilterFromQuery(c),
 		ShiftID:    int64(c.QueryInt("shift_id", 0)),
 		DateFrom:   from,
 		DateTo:     to,
 	}
 
-	groups, total, err := h.service.GetGroups(filter)
+	groups, total, err := h.service.GetGroups(actor(c), filter)
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -66,7 +67,7 @@ func (h *PatrolHandler) GetGroups(c *fiber.Ctx) error {
 }
 
 func (h *PatrolHandler) GetCurrentGroup(c *fiber.Ctx) error {
-	group, items, err := h.service.GetCurrentGroup()
+	group, items, err := h.service.GetCurrentGroup(actor(c), helper.UnitFilterFromQuery(c))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -81,7 +82,7 @@ func (h *PatrolHandler) GetGroup(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrGroupNotFound)
 	}
 
-	group, items, err := h.service.GetGroup(int64(id))
+	group, items, err := h.service.GetGroup(actor(c), int64(id))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -103,6 +104,7 @@ func (h *PatrolHandler) GetItems(c *fiber.Ctx) error {
 
 	filter := dto.ItemFilter{
 		Pagination: helper.NewPagination(c),
+		UnitID:     helper.UnitFilterFromQuery(c),
 		GroupID:    int64(c.QueryInt("group_id", 0)),
 		ShiftID:    int64(c.QueryInt("shift_id", 0)),
 		DateFrom:   from,
@@ -110,7 +112,7 @@ func (h *PatrolHandler) GetItems(c *fiber.Ctx) error {
 		Status:     status,
 	}
 
-	items, total, err := h.service.GetItems(filter)
+	items, total, err := h.service.GetItems(actor(c), filter)
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -152,6 +154,7 @@ func (h *PatrolHandler) Scan(c *fiber.Ctx) error {
 		FaceMatchScore: req.FaceMatchScore,
 		Photos:         scanPhotos(c),
 		UserID:         helper.CurrentUserID(c),
+		UnitID:         helper.CurrentScope(c).UnitID,
 		AppClientID:    helper.CurrentAppClientID(c),
 	})
 	if err != nil {
@@ -179,6 +182,7 @@ func (h *PatrolHandler) GetScans(c *fiber.Ctx) error {
 
 	filter := dto.ScanFilter{
 		Pagination:    helper.NewPagination(c),
+		UnitID:        helper.UnitFilterFromQuery(c),
 		GroupID:       int64(c.QueryInt("group_id", 0)),
 		ShiftID:       int64(c.QueryInt("shift_id", 0)),
 		DateFrom:      from,
@@ -207,6 +211,7 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 	}
 
 	filter := dto.ScanFilter{
+		UnitID:        helper.UnitFilterFromQuery(c),
 		ShiftID:       int64(c.QueryInt("shift_id", 0)),
 		PatrolPointID: int64(c.QueryInt("patrol_point_id", 0)),
 		ScannedBy:     int64(c.QueryInt("scanned_by", 0)),
@@ -219,7 +224,7 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 		return h.errorResponse(c, err)
 	}
 
-	shift, point, officer, err := h.service.FilterNames(filter)
+	names, err := h.service.FilterNames(filter)
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -227,8 +232,8 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 	exportedBy := ""
 	if user, ok := c.Locals(helper.LocalUserID).(int64); ok {
 		exportedBy = strconv.FormatInt(user, 10)
-		if _, _, name, err := h.service.FilterNames(dto.ScanFilter{ScannedBy: user}); err == nil && name != "" {
-			exportedBy = name
+		if exporter, err := h.service.FilterNames(dto.ScanFilter{ScannedBy: user}); err == nil && exporter.User != "" {
+			exportedBy = exporter.User
 		}
 	}
 
@@ -236,9 +241,10 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 	content, err := dto.BuildScanExcel(scans, dto.ScanExportMeta{
 		ExportedAt: now,
 		ExportedBy: exportedBy,
-		Shift:      shift,
-		Point:      point,
-		Officer:    officer,
+		Unit:       names.Unit,
+		Shift:      names.Shift,
+		Point:      names.Point,
+		Officer:    names.User,
 		DateFrom:   from,
 		DateTo:     to,
 		Location:   helper.AppLocation(),
@@ -295,8 +301,11 @@ func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 	var locationErr *service.LocationOutOfRangeError
 
 	switch {
+	case errors.Is(err, service.ErrScanNeedsUnit), errors.Is(err, service.ErrPointOfOtherUnit):
+		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrGroupNotFound),
 		errors.Is(err, service.ErrScanNotFound),
+		errors.Is(err, service.ErrUnitNotFound),
 		errors.Is(err, service.ErrNFCNotRegistered):
 		code, message = http.StatusNotFound, err.Error()
 	case errors.As(err, &locationErr),
@@ -311,6 +320,7 @@ func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 		errors.Is(err, helper.ErrFileTooLarge),
 		errors.Is(err, helper.ErrFileTypeNotAllowed),
 		errors.Is(err, service.ErrExportTooLarge),
+		errors.Is(err, service.ErrUnitRequired),
 		errors.Is(err, service.ErrDateRangeInvalid):
 		code, message = http.StatusUnprocessableEntity, err.Error()
 	default:
@@ -325,6 +335,7 @@ func actor(c *fiber.Ctx) service.Actor {
 	return service.Actor{
 		UserID:   helper.CurrentUserID(c),
 		RoleCode: helper.CurrentRoleCode(c),
+		UnitID:   helper.CurrentScope(c).UnitID,
 	}
 }
 

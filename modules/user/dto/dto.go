@@ -24,10 +24,24 @@ func (d *dto) ToUserDTO(user models.User) UserDTO {
 		facePhotoURL = &url
 	}
 
+	var unit *UserUnitDTO
+	if user.Unit != nil {
+		unit = &UserUnitDTO{
+			ID:        user.Unit.ID,
+			Code:      user.Unit.Code,
+			Name:      user.Unit.Name,
+			Latitude:  user.Unit.Latitude,
+			Longitude: user.Unit.Longitude,
+			IsActive:  user.Unit.IsActive,
+		}
+	}
+
 	return UserDTO{
-		ID:    user.ID,
-		Name:  user.Name,
-		Email: user.Email,
+		UnitID: user.UnitID,
+		Unit:   unit,
+		ID:     user.ID,
+		Name:   user.Name,
+		Email:  user.Email,
 		Role: UserRoleDTO{
 			ID:   user.Role.ID,
 			Code: user.Role.Code,

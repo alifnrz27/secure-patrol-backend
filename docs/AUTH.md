@@ -156,29 +156,48 @@ function signHeaders(method, requestUri, body, appId, appKey) {
   `data.locked_until`, dan `data.retry_after_seconds`). Login berhasil mengembalikan hitungan ke 0.
 - Menonaktifkan user, mengganti role-nya, atau me-reset password-nya langsung mematikan semua session user tersebut.
 
-## 4. Hak akses role & platform
+## 4. Unit, hak akses role & platform
 
-| Fitur | Platform | Super-Admin | Manager Keamanan | Admin Keamanan | Kepala Keamanan | Tim Keamanan |
-|---|---|---|---|---|---|---|
-| Login dari **android/ios** | android/ios | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Login dari **web** (dan server) | web | ✓ | ✓ | ✓ | ✓ | **dilarang** |
-| Profil sendiri, ganti password | semua | ✓ | ✓ | ✓ | ✓ | ✓ (android/ios) |
-| Lihat patrol point, cari berdasarkan NFC | semua | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Tambah/ubah/hapus patrol point | **web** | ✓ | ✓ | ✓ | ✓ | |
-| Lihat shift, group, daftar patroli | semua | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Tambah/ubah/hapus shift | **web** | ✓ | ✓ | ✓ | ✓ | |
-| Scan NFC patroli | **android/ios** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| History scan | semua | semua scan | semua scan | semua scan | semua scan | scan sendiri |
-| Baca help desk (aturan, tata cara, FAQ) | semua | ✓ + draft | ✓ + draft | ✓ + draft | ✓ + draft | ✓ (terbit saja) |
-| Tambah/ubah/hapus artikel help desk | **web** | ✓ | ✓ | ✓ | ✓ | |
-| Export Excel riwayat scan | **web** | ✓ | ✓ | ✓ | ✓ | |
-| Audit log (riwayat create/update/delete) | **web** | ✓ | ✓ | | | |
-| Lihat pengaturan sistem | **web** | ✓ | ✓ | ✓ | ✓ | |
-| Ubah pengaturan sistem | **web** | ✓ | | | | |
-| Lihat role | **web** | ✓ | ✓ | ✓ | | |
-| Tambah/ubah/hapus role | **web** | ✓ | | | | |
-| Kelola user | **web** | ✓ | ✓ | ✓ | | |
-| Kelola App ID / App Key | **web** | ✓ | | | | |
+**Pusat dan unit.** Super-Admin (admin pusat) dan Manager Keamanan adalah user **pusat**: tidak punya unit dan
+melihat data semua unit (endpoint daftar menerima filter `?unit_id=`). Kepala Keamanan, Admin Keamanan, Tim
+Keamanan, dan role kustom adalah user **unit**: wajib punya satu unit dan hanya melihat data unitnya. Filter
+`unit_id` diabaikan untuk mereka, dan data unit lain dijawab 404 (seolah tidak ada).
+
+- Master unit (`/units`: kode unik, nama, latitude/longitude, status) hanya dikelola Super-Admin. Unit baru
+  otomatis mendapat 3 shift default. Unit yang masih punya user atau patrol point tidak bisa dihapus.
+- **Unit nonaktif**: semua user unit itu ditolak dengan HTTP 403 `your unit is inactive, contact the head office`
+  saat login, refresh, dan setiap request, sehingga token yang sudah ada langsung tidak berlaku.
+- Patrol point, shift, dan user unit dikelola Kepala/Admin Keamanan unit tersebut. Pusat tidak mengatur shift
+  dan patrol point (hanya melihat). Manager Keamanan hanya memantau.
+- Kode NFC unik di **semua unit**. Petugas hanya bisa scan titik milik unitnya.
+- Login, refresh, dan `/auth/me` mengembalikan `user.unit_id` dan `user.unit` (`null` untuk user pusat).
+
+| Fitur | Platform | Super-Admin | Manager Keamanan | Kepala / Admin Keamanan | Tim Keamanan |
+|---|---|---|---|---|---|
+| Login dari **android/ios** | android/ios | ✓ | ✓ | ✓ | ✓ |
+| Login dari **web** (dan server) | web | ✓ | ✓ | ✓ | **dilarang** |
+| Profil sendiri, ganti password | semua | ✓ | ✓ | ✓ | ✓ (android/ios) |
+| Lihat unit | semua | semua | semua | unit sendiri | unit sendiri |
+| Tambah/ubah/hapus unit | **web** | ✓ | | | |
+| Lihat patrol point, cari berdasarkan NFC | semua | semua unit | semua unit | unit sendiri | unit sendiri |
+| Tambah/ubah/hapus patrol point | **web** | | | ✓ (unit sendiri) | |
+| Lihat shift, group, daftar patroli | semua | semua unit | semua unit | unit sendiri | unit sendiri |
+| Tambah/ubah/hapus shift | **web** | | | ✓ (unit sendiri) | |
+| Scan NFC patroli | **android/ios** | | | ✓ (titik unit sendiri) | ✓ (titik unit sendiri) |
+| History scan | semua | semua unit | semua unit | semua scan unit sendiri | scan sendiri |
+| Export Excel riwayat scan | **web** | semua unit | semua unit | unit sendiri | |
+| Baca help desk (aturan, tata cara, FAQ) | semua | ✓ + draft | ✓ + draft | ✓ (terbit saja) | ✓ (terbit saja) |
+| Tambah/ubah/hapus artikel help desk | **web** | ✓ | | | |
+| Audit log (riwayat create/update/delete) | **web** | ✓ | ✓ | | |
+| Lihat pengaturan sistem | **web** | global / per unit | global / per unit | unit sendiri | |
+| Ubah pengaturan sistem | **web** | nilai global | | nilai unit sendiri | |
+| Lihat role | **web** | ✓ | ✓ | ✓ | |
+| Tambah/ubah/hapus role | **web** | ✓ | | | |
+| Lihat user | **web** | semua | semua | unit sendiri | |
+| Tambah/ubah/hapus user | **web** | semua (termasuk user pusat) | | user unit sendiri (role unit) | |
+| Kelola App ID / App Key | **web** | ✓ | | | |
+
+Kepala Keamanan dan Admin Keamanan saat ini punya hak akses yang sama, tetapi tetap role yang berbeda.
 
 - Role yang tidak boleh memakai web (Tim Keamanan dan role kustom) ditolak dengan HTTP 403
   `your role is not allowed to sign in on this platform` saat login, refresh token, dan setiap request, sehingga
@@ -186,7 +205,9 @@ function signHeaders(method, requestUri, body, appId, appKey) {
 - Platform ditentukan oleh App Client yang menandatangani request (`X-App-Id`), bukan oleh user. Fitur bertanda
   **web** menolak request dari App Client android/ios/server dengan HTTP 403
   `This feature is only available on the web platform`, walaupun user-nya Super-Admin.
-- Hanya Super-Admin yang bisa membuat atau mengubah user dengan role Super-Admin.
+- Hanya Super-Admin yang bisa membuat atau mengubah user pusat (Super-Admin, Manager Keamanan). Saat membuat user
+  unit, Super-Admin wajib mengisi `unit_id`; Kepala/Admin Keamanan selalu membuat user di unitnya sendiri.
+  Memindahkan user ke unit lain (hanya Super-Admin) mematikan semua session user tersebut.
 
 ### Foto wajah
 
@@ -202,10 +223,11 @@ function signHeaders(method, requestUri, body, appId, appKey) {
 
 ## 5. Patroli
 
-**Shift & group.** Admin mengatur shift (default: 08:00–16:00, 16:00–24:00, 00:00–08:00). Jam akhir adalah
-batas (cut-off): scan tepat di jam akhir atau sesudahnya masuk ke shift berikutnya. Server otomatis membuat
-satu *group* per shift per tanggal, lalu menyalin semua titik patroli ke daftar patroli group tersebut.
-Layar utama aplikasi cukup memanggil `GET /patrol-groups/current`.
+**Shift & group.** Setiap unit mengatur shift-nya sendiri (default unit baru: 08:00–16:00, 16:00–24:00,
+00:00–08:00). Jam akhir adalah batas (cut-off): scan tepat di jam akhir atau sesudahnya masuk ke shift berikutnya.
+Server otomatis membuat satu *group* per shift per tanggal **untuk setiap unit aktif**, lalu menyalin titik patroli
+unit tersebut ke daftar patroli group-nya. Layar utama aplikasi cukup memanggil `GET /patrol-groups/current`
+(user pusat menambahkan `?unit_id=`).
 
 **Scan (`POST /patrol-scans`, multipart).**
 
@@ -248,9 +270,15 @@ Semua kegagalan app signature mengembalikan HTTP 401 dengan salah satu pesan ber
 ## 7. Pengaturan sistem
 
 Aturan yang bisa berubah disimpan di database (tabel `system_settings`), bukan di `.env`. Saat server start,
-setting yang belum ada dibuat dengan nilai default; nilai yang sudah diubah tidak ditimpa. Nilai tidak valid di
-database diabaikan dan diganti default. Super-Admin mengubahnya lewat `PUT /api/v1/settings` (langsung berlaku,
-tercatat di audit log; `null` = kembali ke default).
+setting global yang belum ada dibuat dengan nilai default; nilai yang sudah diubah tidak ditimpa. Nilai tidak
+valid di database diabaikan. Perubahan lewat `PUT /api/v1/settings` langsung berlaku dan tercatat di audit log.
+
+Setting berlaku **per unit**:
+
+- **Nilai global** diubah Super-Admin (`null` = kembali ke default). Dipakai semua unit yang tidak mengisi nilainya sendiri.
+- **Nilai unit** diubah Kepala/Admin Keamanan untuk unitnya (`null` = kembali mengikuti nilai global).
+  `GET /settings` menampilkan `value`, `global_value`, dan `is_inherited` untuk setiap setting.
+- User unit memakai setting unitnya (login, token, radius scan, validasi foto wajah). User pusat memakai nilai global.
 
 | Key | Default | Keterangan | Dikirim ke aplikasi |
 |---|---|---|---|

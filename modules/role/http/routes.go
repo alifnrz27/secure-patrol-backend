@@ -10,7 +10,9 @@ import (
 func RoleRoutes(app *fiber.App, handler *RoleHandler) {
 	// Role management is only available from the web platform.
 	webOnly := middleware.RequirePlatforms(models.PlatformWeb)
-	canRead := middleware.RequireRoles(models.RoleSuperAdmin, models.RoleSecurityManager, models.RoleSecurityAdmin)
+	// Unit heads and admins read roles to fill the user form; only the
+	// Super-Admin changes them (roles are shared by every unit).
+	canRead := middleware.RequireRoles(models.WebRoles...)
 	canWrite := middleware.RequireRoles(models.RoleSuperAdmin)
 
 	app.Get("/roles", webOnly, canRead, handler.GetRoles)

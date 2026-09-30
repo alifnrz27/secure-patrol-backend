@@ -33,6 +33,7 @@ type AuditLog struct {
 	UserID      *int64         `json:"user_id" gorm:"index"`
 	User        *User          `json:"-" gorm:"foreignKey:UserID"`
 	RoleCode    string         `json:"role_code" gorm:"type:varchar(50)"`
+	UnitID      *int64         `json:"unit_id" gorm:"index"`
 	AppClientID *int64         `json:"app_client_id"`
 	AppPlatform string         `json:"app_platform" gorm:"type:varchar(20)"`
 	IPAddress   string         `json:"ip_address" gorm:"type:varchar(45)"`

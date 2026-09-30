@@ -60,13 +60,18 @@ func (v Values) Map() map[string]interface{} {
 	return result
 }
 
-// buildValues applies stored values over the defaults; a stored value that is
-// no longer valid (e.g. edited directly in the database) is ignored.
-func buildValues(stored map[string]string, warn func(key, value string, err error)) Values {
+// buildValues applies the stored layers over the defaults, in order (e.g. the
+// global values, then a unit's overrides). A stored value that is no longer
+// valid (e.g. edited directly in the database) is ignored.
+func buildValues(layers []map[string]string, warn func(key, value string, err error)) Values {
 	raw := make(map[string]string, len(Definitions))
 	for _, def := range Definitions {
 		raw[def.Key] = def.Default
-		if value, ok := stored[def.Key]; ok {
+		for _, stored := range layers {
+			value, ok := stored[def.Key]
+			if !ok {
+				continue
+			}
 			normalized, err := def.normalize(value)
 			if err != nil {
 				if warn != nil {

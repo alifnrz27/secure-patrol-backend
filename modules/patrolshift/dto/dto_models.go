@@ -4,6 +4,7 @@ import "time"
 
 type PatrolShiftDTO struct {
 	ID              int64     `json:"id"`
+	UnitID          int64     `json:"unit_id"`
 	Name            string    `json:"name"`
 	StartTime       string    `json:"start_time"`
 	EndTime         string    `json:"end_time"`

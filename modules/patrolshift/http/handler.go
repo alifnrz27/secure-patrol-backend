@@ -22,7 +22,7 @@ func NewPatrolShiftHandler(service service.PatrolShiftService, dto dto.PatrolShi
 }
 
 func (h *PatrolShiftHandler) GetShifts(c *fiber.Ctx) error {
-	shifts, err := h.service.GetShifts()
+	shifts, err := h.service.GetShifts(helper.CurrentScope(c), int64(c.QueryInt("unit_id", 0)))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -37,7 +37,7 @@ func (h *PatrolShiftHandler) GetShift(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrShiftNotFound)
 	}
 
-	shift, err := h.service.GetShiftByID(int64(id))
+	shift, err := h.service.GetShiftByID(helper.CurrentScope(c), int64(id))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -58,12 +58,12 @@ func (h *PatrolShiftHandler) CreateShift(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnprocessableEntity).JSON(response)
 	}
 
-	shift, err := h.service.CreateShift(models.PatrolShift{
+	shift, err := h.service.CreateShift(helper.CurrentScope(c), models.PatrolShift{
 		Name:      req.Name,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
 		IsActive:  req.IsActive == nil || *req.IsActive,
-	}, helper.CurrentUserID(c))
+	})
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -89,12 +89,12 @@ func (h *PatrolShiftHandler) UpdateShift(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnprocessableEntity).JSON(response)
 	}
 
-	shift, err := h.service.UpdateShift(int64(id), models.PatrolShift{
+	shift, err := h.service.UpdateShift(helper.CurrentScope(c), int64(id), models.PatrolShift{
 		Name:      req.Name,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
 		IsActive:  *req.IsActive,
-	}, helper.CurrentUserID(c))
+	})
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -109,7 +109,7 @@ func (h *PatrolShiftHandler) DeleteShift(c *fiber.Ctx) error {
 		return h.errorResponse(c, service.ErrShiftNotFound)
 	}
 
-	if err := h.service.DeleteShift(int64(id)); err != nil {
+	if err := h.service.DeleteShift(helper.CurrentScope(c), int64(id)); err != nil {
 		return h.errorResponse(c, err)
 	}
 
@@ -124,6 +124,8 @@ func (h *PatrolShiftHandler) errorResponse(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrShiftNotFound):
 		code, message = http.StatusNotFound, err.Error()
+	case errors.Is(err, service.ErrUnitRequired):
+		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrShiftOverlap):
 		code, message = http.StatusConflict, err.Error()
 	case errors.Is(err, service.ErrShiftTimeInvalid), errors.Is(err, service.ErrShiftDurationInvalid):

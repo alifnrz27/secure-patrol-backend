@@ -15,6 +15,17 @@ const (
 	RoleSecurityTeam    = "security_team"
 )
 
+// CentralRoles work for the whole organization and do not belong to a unit.
+// Every other role (including custom roles) belongs to exactly one unit.
+var CentralRoles = []string{RoleSuperAdmin, RoleSecurityManager}
+
+// UnitManagerRoles manage the data of their own unit.
+var UnitManagerRoles = []string{RoleSecurityHead, RoleSecurityAdmin}
+
+func IsCentralRole(code string) bool {
+	return code == RoleSuperAdmin || code == RoleSecurityManager
+}
+
 type Role struct {
 	ID          int64          `json:"id" gorm:"primaryKey"`
 	Code        string         `json:"code" gorm:"type:varchar(50);uniqueIndex;not null"`

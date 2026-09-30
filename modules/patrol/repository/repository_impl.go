@@ -17,13 +17,24 @@ func NewPatrolRepository(db *gorm.DB) PatrolRepository {
 	return &repository{db: db}
 }
 
-func (r *repository) FindActiveShifts() (shifts []models.PatrolShift, err error) {
-	err = r.db.Where("is_active = ?", true).Order("start_time ASC").Find(&shifts).Error
+func (r *repository) FindActiveUnitIDs() (ids []int64, err error) {
+	err = r.db.Model(&models.Unit{}).Where("is_active = ?", true).Order("id ASC").Pluck("id", &ids).Error
+	return ids, err
+}
+
+func (r *repository) UnitExists(unitID int64) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.Unit{}).Where("id = ?", unitID).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *repository) FindActiveShifts(unitID int64) (shifts []models.PatrolShift, err error) {
+	err = r.db.Where("unit_id = ? AND is_active = ?", unitID, true).Order("start_time ASC").Find(&shifts).Error
 	return shifts, err
 }
 
-func (r *repository) FindAllPatrolPoints() (points []models.PatrolPoint, err error) {
-	err = r.db.Order("name ASC").Find(&points).Error
+func (r *repository) FindAllPatrolPoints(unitID int64) (points []models.PatrolPoint, err error) {
+	err = r.db.Where("unit_id = ?", unitID).Order("name ASC").Find(&points).Error
 	return points, err
 }
 
@@ -32,18 +43,28 @@ func (r *repository) FindPatrolPointByNFCCode(nfcCode string) (point models.Patr
 	return point, err
 }
 
-// groupsWithProgress selects groups together with their checklist progress.
+// groupColumns selects a group with its unit's code and name (also of deleted
+// units, so history keeps them).
+const groupColumns = `patrol_groups.*,
+		(SELECT u.code FROM units u WHERE u.id = patrol_groups.unit_id) AS unit_code,
+		(SELECT u.name FROM units u WHERE u.id = patrol_groups.unit_id) AS unit_name`
+
+func withUnit(db *gorm.DB) *gorm.DB {
+	return db.Select(groupColumns)
+}
+
+// groupsWithProgress selects groups together with their unit and checklist progress.
 func (r *repository) groupsWithProgress() *gorm.DB {
-	return r.db.Model(&models.PatrolGroup{}).Select(`patrol_groups.*,
+	return r.db.Model(&models.PatrolGroup{}).Select(groupColumns + `,
 		(SELECT COUNT(*) FROM patrol_list_items i WHERE i.patrol_group_id = patrol_groups.id AND i.deleted_at IS NULL) AS total_points,
 		(SELECT COUNT(*) FROM patrol_list_items i WHERE i.patrol_group_id = patrol_groups.id AND i.deleted_at IS NULL AND i.scan_count > 0) AS scanned_points,
 		(SELECT COUNT(*) FROM patrol_scans s WHERE s.patrol_group_id = patrol_groups.id AND s.deleted_at IS NULL) AS total_scans,
 		(SELECT COUNT(*) FROM patrol_scans s WHERE s.patrol_group_id = patrol_groups.id AND s.deleted_at IS NULL AND s.condition = 'abnormal') AS abnormal_scans`)
 }
 
-func (r *repository) FindGroupContaining(t time.Time) (group models.PatrolGroup, err error) {
+func (r *repository) FindGroupContaining(unitID int64, t time.Time) (group models.PatrolGroup, err error) {
 	err = r.groupsWithProgress().
-		Where("patrol_groups.start_at <= ? AND patrol_groups.end_at > ?", t, t).
+		Where("patrol_groups.unit_id = ? AND patrol_groups.start_at <= ? AND patrol_groups.end_at > ?", unitID, t, t).
 		Order("patrol_groups.start_at DESC").
 		First(&group).Error
 	return group, err
@@ -61,7 +82,10 @@ func (r *repository) FindGroupByID(id int64) (group models.PatrolGroup, err erro
 	return group, err
 }
 
-func applyGroupFilter(query *gorm.DB, table string, shiftID int64, dateFrom, dateTo string) *gorm.DB {
+func applyGroupFilter(query *gorm.DB, table string, unitID, shiftID int64, dateFrom, dateTo string) *gorm.DB {
+	if unitID > 0 {
+		query = query.Where(table+".unit_id = ?", unitID)
+	}
 	if shiftID > 0 {
 		query = query.Where(table+".patrol_shift_id = ?", shiftID)
 	}
@@ -75,12 +99,12 @@ func applyGroupFilter(query *gorm.DB, table string, shiftID int64, dateFrom, dat
 }
 
 func (r *repository) FindGroups(filter dto.GroupFilter) (groups []models.PatrolGroup, total int64, err error) {
-	count := applyGroupFilter(r.db.Model(&models.PatrolGroup{}), "patrol_groups", filter.ShiftID, filter.DateFrom, filter.DateTo)
+	count := applyGroupFilter(r.db.Model(&models.PatrolGroup{}), "patrol_groups", filter.UnitID, filter.ShiftID, filter.DateFrom, filter.DateTo)
 	if err = count.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	err = applyGroupFilter(r.groupsWithProgress(), "patrol_groups", filter.ShiftID, filter.DateFrom, filter.DateTo).
+	err = applyGroupFilter(r.groupsWithProgress(), "patrol_groups", filter.UnitID, filter.ShiftID, filter.DateFrom, filter.DateTo).
 		Order("patrol_groups.start_at DESC").
 		Limit(filter.Limit).
 		Offset(filter.Offset()).
@@ -89,15 +113,16 @@ func (r *repository) FindGroups(filter dto.GroupFilter) (groups []models.PatrolG
 	return groups, total, err
 }
 
-func (r *repository) GroupBounds(t time.Time) (latestEnd *time.Time, earliestStart *time.Time, err error) {
+func (r *repository) GroupBounds(unitID int64, t time.Time) (latestEnd *time.Time, earliestStart *time.Time, err error) {
 	var bounds struct {
 		LatestEnd     *time.Time
 		EarliestStart *time.Time
 	}
 
 	err = r.db.Raw(`SELECT
-		(SELECT MAX(end_at) FROM patrol_groups WHERE end_at <= ? AND deleted_at IS NULL) AS latest_end,
-		(SELECT MIN(start_at) FROM patrol_groups WHERE start_at > ? AND deleted_at IS NULL) AS earliest_start`, t, t).
+		(SELECT MAX(end_at) FROM patrol_groups WHERE unit_id = ? AND end_at <= ? AND deleted_at IS NULL) AS latest_end,
+		(SELECT MIN(start_at) FROM patrol_groups WHERE unit_id = ? AND start_at > ? AND deleted_at IS NULL) AS earliest_start`,
+		unitID, t, unitID, t).
 		Scan(&bounds).Error
 
 	return bounds.LatestEnd, bounds.EarliestStart, err
@@ -157,7 +182,7 @@ func (r *repository) SyncGroupItems(groupID int64, points []models.PatrolPoint) 
 func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolListItem, total int64, err error) {
 	query := r.db.Model(&models.PatrolListItem{}).
 		Joins("JOIN patrol_groups ON patrol_groups.id = patrol_list_items.patrol_group_id AND patrol_groups.deleted_at IS NULL")
-	query = applyGroupFilter(query, "patrol_groups", filter.ShiftID, filter.DateFrom, filter.DateTo)
+	query = applyGroupFilter(query, "patrol_groups", filter.UnitID, filter.ShiftID, filter.DateFrom, filter.DateTo)
 
 	if filter.GroupID > 0 {
 		query = query.Where("patrol_list_items.patrol_group_id = ?", filter.GroupID)
@@ -181,7 +206,7 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 	}
 
 	err = query.
-		Preload("PatrolGroup").
+		Preload("PatrolGroup", withUnit).
 		Preload("LastScannedByUser", unscoped).
 		Order("patrol_groups.start_at DESC, patrol_list_items.name ASC").
 		Limit(filter.Limit).
@@ -213,7 +238,7 @@ func unscoped(db *gorm.DB) *gorm.DB {
 func (r *repository) scanQuery() *gorm.DB {
 	return r.db.Model(&models.PatrolScan{}).
 		Preload("ScannedByUser", unscoped).
-		Preload("PatrolGroup").
+		Preload("PatrolGroup", withUnit).
 		Preload("PatrolListItem").
 		Preload("Photos", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") })
 }
@@ -233,7 +258,7 @@ func (r *repository) FindScanByID(id int64) (scan models.PatrolScan, err error) 
 func (r *repository) scanFilterQuery(filter dto.ScanFilter) *gorm.DB {
 	query := r.db.Model(&models.PatrolScan{}).
 		Joins("JOIN patrol_groups ON patrol_groups.id = patrol_scans.patrol_group_id AND patrol_groups.deleted_at IS NULL")
-	query = applyGroupFilter(query, "patrol_groups", filter.ShiftID, filter.DateFrom, filter.DateTo)
+	query = applyGroupFilter(query, "patrol_groups", filter.UnitID, filter.ShiftID, filter.DateFrom, filter.DateTo)
 
 	if filter.GroupID > 0 {
 		query = query.Where("patrol_scans.patrol_group_id = ?", filter.GroupID)
@@ -264,7 +289,7 @@ func (r *repository) FindScansForExport(filter dto.ScanFilter, limit int) (scans
 	// Photos are not part of the export.
 	err = r.db.Model(&models.PatrolScan{}).
 		Preload("ScannedByUser", unscoped).
-		Preload("PatrolGroup").
+		Preload("PatrolGroup", withUnit).
 		Preload("PatrolListItem").
 		Where("patrol_scans.id IN ?", ids).
 		Order("patrol_scans.scanned_at ASC, patrol_scans.id ASC").
@@ -274,20 +299,23 @@ func (r *repository) FindScansForExport(filter dto.ScanFilter, limit int) (scans
 
 // FilterNames resolves the ids used in an export filter to names, including
 // deleted records, for the filter summary sheet.
-func (r *repository) FilterNames(shiftID, patrolPointID, userID int64) (shift, point, user string, err error) {
+func (r *repository) FilterNames(unitID, shiftID, patrolPointID, userID int64) (names FilterNames, err error) {
 	lookup := func(model interface{}, id int64, column string, out *string) error {
 		if id <= 0 {
 			return nil
 		}
 		return r.db.Unscoped().Model(model).Where("id = ?", id).Select(column).Scan(out).Error
 	}
-	if err = lookup(&models.PatrolShift{}, shiftID, "name", &shift); err != nil {
+	if err = lookup(&models.Unit{}, unitID, "name", &names.Unit); err != nil {
 		return
 	}
-	if err = lookup(&models.PatrolPoint{}, patrolPointID, "name", &point); err != nil {
+	if err = lookup(&models.PatrolShift{}, shiftID, "name", &names.Shift); err != nil {
 		return
 	}
-	err = lookup(&models.User{}, userID, "name", &user)
+	if err = lookup(&models.PatrolPoint{}, patrolPointID, "name", &names.Point); err != nil {
+		return
+	}
+	err = lookup(&models.User{}, userID, "name", &names.User)
 	return
 }
 

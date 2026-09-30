@@ -18,27 +18,40 @@ func NewPatrolPointService(repo repository.PatrolPointRepository) PatrolPointSer
 	return &service{repo: repo}
 }
 
-func (s *service) GetPatrolPoints(pagination helper.Pagination) ([]models.PatrolPoint, int64, error) {
-	return s.repo.FindAll(pagination)
+func (s *service) GetPatrolPoints(scope helper.Scope, pagination helper.Pagination, unitID int64) ([]models.PatrolPoint, int64, error) {
+	return s.repo.FindAll(pagination, scope.UnitFilter(unitID))
 }
 
-func (s *service) GetPatrolPointByID(id int64) (models.PatrolPoint, error) {
+func (s *service) GetPatrolPointByID(scope helper.Scope, id int64) (models.PatrolPoint, error) {
 	point, err := s.repo.FindByID(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return point, ErrPatrolPointNotFound
-	}
-	return point, err
+	return scoped(scope, point, err)
 }
 
-func (s *service) GetPatrolPointByNFCCode(nfcCode string) (models.PatrolPoint, error) {
+func (s *service) GetPatrolPointByNFCCode(scope helper.Scope, nfcCode string) (models.PatrolPoint, error) {
 	point, err := s.repo.FindByNFCCode(NormalizeNFCCode(nfcCode))
+	return scoped(scope, point, err)
+}
+
+// scoped hides points of other units, so they look like they do not exist.
+func scoped(scope helper.Scope, point models.PatrolPoint, err error) (models.PatrolPoint, error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return point, ErrPatrolPointNotFound
 	}
-	return point, err
+	if err != nil {
+		return point, err
+	}
+	if !scope.CanAccessUnit(point.UnitID) {
+		return models.PatrolPoint{}, ErrPatrolPointNotFound
+	}
+	return point, nil
 }
 
-func (s *service) CreatePatrolPoint(point models.PatrolPoint, actorID int64) (models.PatrolPoint, error) {
+func (s *service) CreatePatrolPoint(scope helper.Scope, point models.PatrolPoint) (models.PatrolPoint, error) {
+	if scope.UnitID == nil {
+		return point, ErrUnitRequired
+	}
+	actorID := scope.UserID
+	point.UnitID = *scope.UnitID
 	point.Name = strings.TrimSpace(point.Name)
 	point.Location = strings.TrimSpace(point.Location)
 	point.NFCCode = NormalizeNFCCode(point.NFCCode)
@@ -60,11 +73,15 @@ func (s *service) CreatePatrolPoint(point models.PatrolPoint, actorID int64) (mo
 	return point, nil
 }
 
-func (s *service) UpdatePatrolPoint(id int64, input models.PatrolPoint, actorID int64) (models.PatrolPoint, error) {
-	point, err := s.GetPatrolPointByID(id)
+func (s *service) UpdatePatrolPoint(scope helper.Scope, id int64, input models.PatrolPoint) (models.PatrolPoint, error) {
+	if scope.UnitID == nil {
+		return models.PatrolPoint{}, ErrUnitRequired
+	}
+	point, err := s.GetPatrolPointByID(scope, id)
 	if err != nil {
 		return point, err
 	}
+	actorID := scope.UserID
 
 	nfcCode := NormalizeNFCCode(input.NFCCode)
 	if nfcCode != point.NFCCode {
@@ -89,11 +106,14 @@ func (s *service) UpdatePatrolPoint(id int64, input models.PatrolPoint, actorID 
 		return point, err
 	}
 
-	return s.GetPatrolPointByID(point.ID)
+	return s.GetPatrolPointByID(scope, point.ID)
 }
 
-func (s *service) DeletePatrolPoint(id int64) error {
-	point, err := s.GetPatrolPointByID(id)
+func (s *service) DeletePatrolPoint(scope helper.Scope, id int64) error {
+	if scope.UnitID == nil {
+		return ErrUnitRequired
+	}
+	point, err := s.GetPatrolPointByID(scope, id)
 	if err != nil {
 		return err
 	}

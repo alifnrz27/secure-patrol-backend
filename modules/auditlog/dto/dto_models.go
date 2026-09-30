@@ -8,6 +8,7 @@ import (
 type AuditLogFilter struct {
 	helper.Pagination
 	UserID   int64
+	UnitID   int64
 	Action   string
 	Resource string
 	DateFrom string
@@ -22,10 +23,12 @@ type AuditUserDTO struct {
 }
 
 type AuditLogDTO struct {
-	ID          int64         `json:"id"`
-	Action      string        `json:"action"`
-	Resource    string        `json:"resource"`
-	ResourceID  *string       `json:"resource_id"`
+	ID         int64   `json:"id"`
+	Action     string  `json:"action"`
+	Resource   string  `json:"resource"`
+	ResourceID *string `json:"resource_id"`
+	// UnitID is the unit of the user who made the change; null for the head office.
+	UnitID      *int64        `json:"unit_id"`
 	Endpoint    string        `json:"endpoint"`
 	Method      string        `json:"method"`
 	Path        string        `json:"path"`

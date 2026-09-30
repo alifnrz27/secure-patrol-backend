@@ -30,13 +30,18 @@ func (r *repository) FindAll(filter dto.UserFilter) (users []models.User, total 
 	if filter.IsActive != nil {
 		query = query.Where("is_active = ?", *filter.IsActive)
 	}
+	if filter.UnitID > 0 {
+		query = query.Where("unit_id = ?", filter.UnitID)
+	} else if filter.HeadOfficeOnly {
+		query = query.Where("unit_id IS NULL")
+	}
 
 	if err = query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	err = query.
-		Preload("Role").
+		Preload("Role").Preload("Unit").
 		Order("id DESC").
 		Limit(filter.Limit).
 		Offset(filter.Offset()).
@@ -46,12 +51,12 @@ func (r *repository) FindAll(filter dto.UserFilter) (users []models.User, total 
 }
 
 func (r *repository) FindByID(id int64) (user models.User, err error) {
-	err = r.db.Preload("Role").First(&user, id).Error
+	err = r.db.Preload("Role").Preload("Unit").First(&user, id).Error
 	return user, err
 }
 
 func (r *repository) FindByEmail(email string) (user models.User, err error) {
-	err = r.db.Preload("Role").Where("email = ?", email).First(&user).Error
+	err = r.db.Preload("Role").Preload("Unit").Where("email = ?", email).First(&user).Error
 	return user, err
 }
 
@@ -59,17 +64,17 @@ func (r *repository) Create(user *models.User) error {
 	if err := r.db.Create(user).Error; err != nil {
 		return err
 	}
-	return r.db.Preload("Role").First(user, user.ID).Error
+	return r.db.Preload("Role").Preload("Unit").First(user, user.ID).Error
 }
 
 func (r *repository) Update(user *models.User) error {
 	err := r.db.Model(user).
-		Select("name", "email", "role_id", "is_active", "face_photo_path", "face_photo_updated_at").
+		Select("name", "email", "role_id", "unit_id", "is_active", "face_photo_path", "face_photo_updated_at").
 		Updates(user).Error
 	if err != nil {
 		return err
 	}
-	return r.db.Preload("Role").First(user, user.ID).Error
+	return r.db.Preload("Role").Preload("Unit").First(user, user.ID).Error
 }
 
 func (r *repository) UpdatePassword(userID int64, passwordHash string, changedAt time.Time) error {

@@ -31,11 +31,11 @@ func NewPatrolService(repo repository.PatrolRepository) PatrolService {
 	return &service{repo: repo}
 }
 
-func (s *service) EnsureGroupAt(t time.Time) (models.PatrolGroup, error) {
-	group, err := s.repo.FindGroupContaining(t)
+func (s *service) EnsureGroupAt(unitID int64, t time.Time) (models.PatrolGroup, error) {
+	group, err := s.repo.FindGroupContaining(unitID, t)
 	if err == nil {
 		if time.Now().Before(group.EndAt) {
-			if err := s.syncItems(group.ID); err != nil {
+			if err := s.syncItems(group); err != nil {
 				return group, err
 			}
 		}
@@ -45,7 +45,7 @@ func (s *service) EnsureGroupAt(t time.Time) (models.PatrolGroup, error) {
 		return group, err
 	}
 
-	shifts, err := s.repo.FindActiveShifts()
+	shifts, err := s.repo.FindActiveShifts(unitID)
 	if err != nil {
 		return group, err
 	}
@@ -64,7 +64,7 @@ func (s *service) EnsureGroupAt(t time.Time) (models.PatrolGroup, error) {
 
 	// Never overlap groups created with older shift settings.
 	startAt, endAt := resolved.StartAt, resolved.EndAt
-	latestEnd, earliestStart, err := s.repo.GroupBounds(t)
+	latestEnd, earliestStart, err := s.repo.GroupBounds(unitID, t)
 	if err != nil {
 		return group, err
 	}
@@ -75,12 +75,13 @@ func (s *service) EnsureGroupAt(t time.Time) (models.PatrolGroup, error) {
 		endAt = *earliestStart
 	}
 
-	points, err := s.repo.FindAllPatrolPoints()
+	points, err := s.repo.FindAllPatrolPoints(unitID)
 	if err != nil {
 		return group, err
 	}
 
 	group = models.PatrolGroup{
+		UnitID:        unitID,
 		PatrolShiftID: resolved.Shift.ID,
 		ShiftName:     resolved.Shift.Name,
 		ShiftDate:     shiftDate,
@@ -96,24 +97,32 @@ func (s *service) EnsureGroupAt(t time.Time) (models.PatrolGroup, error) {
 		return group, err
 	}
 
-	log.Infof("patrol group %d created: %s %s", group.ID, group.ShiftName, shiftDate.Format("2006-01-02"))
+	log.Infof("patrol group %d created: unit %d %s %s", group.ID, unitID, group.ShiftName, shiftDate.Format("2006-01-02"))
 	return s.repo.FindGroupByID(group.ID)
 }
 
-func (s *service) syncItems(groupID int64) error {
-	points, err := s.repo.FindAllPatrolPoints()
+func (s *service) syncItems(group models.PatrolGroup) error {
+	points, err := s.repo.FindAllPatrolPoints(group.UnitID)
 	if err != nil {
 		return err
 	}
-	return s.repo.SyncGroupItems(groupID, points)
+	return s.repo.SyncGroupItems(group.ID, points)
 }
 
-// RunScheduler creates the current patrol group every minute so the patrol
-// list is ready before the first scan of a shift.
+// RunScheduler creates the current patrol group of every active unit each
+// minute, so the patrol list is ready before the first scan of a shift.
 func (s *service) RunScheduler(ctx context.Context) {
 	run := func() {
-		if _, err := s.EnsureGroupAt(time.Now()); err != nil && !errors.Is(err, ErrNoActiveShift) {
+		unitIDs, err := s.repo.FindActiveUnitIDs()
+		if err != nil {
 			log.Errorf("patrol scheduler: %v", err)
+			return
+		}
+		now := time.Now()
+		for _, unitID := range unitIDs {
+			if _, err := s.EnsureGroupAt(unitID, now); err != nil && !errors.Is(err, ErrNoActiveShift) {
+				log.Errorf("patrol scheduler: unit %d: %v", unitID, err)
+			}
 		}
 	}
 
@@ -131,11 +140,12 @@ func (s *service) RunScheduler(ctx context.Context) {
 	}
 }
 
-func (s *service) GetGroups(filter dto.GroupFilter) ([]models.PatrolGroup, int64, error) {
+func (s *service) GetGroups(actor Actor, filter dto.GroupFilter) ([]models.PatrolGroup, int64, error) {
+	filter.UnitID = actor.scope().UnitFilter(filter.UnitID)
 	return s.repo.FindGroups(filter)
 }
 
-func (s *service) GetGroup(id int64) (models.PatrolGroup, []models.PatrolListItem, error) {
+func (s *service) GetGroup(actor Actor, id int64) (models.PatrolGroup, []models.PatrolListItem, error) {
 	group, err := s.repo.FindGroupByID(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return group, nil, ErrGroupNotFound
@@ -143,20 +153,38 @@ func (s *service) GetGroup(id int64) (models.PatrolGroup, []models.PatrolListIte
 	if err != nil {
 		return group, nil, err
 	}
+	if !actor.scope().CanAccessUnit(group.UnitID) {
+		return models.PatrolGroup{}, nil, ErrGroupNotFound
+	}
 
 	items, err := s.repo.FindItemsByGroup(group.ID)
 	return group, items, err
 }
 
-func (s *service) GetCurrentGroup() (models.PatrolGroup, []models.PatrolListItem, error) {
-	group, err := s.EnsureGroupAt(time.Now())
+func (s *service) GetCurrentGroup(actor Actor, unitID int64) (models.PatrolGroup, []models.PatrolListItem, error) {
+	unitID = actor.scope().UnitFilter(unitID)
+	if unitID <= 0 {
+		return models.PatrolGroup{}, nil, ErrUnitRequired
+	}
+	if actor.UnitID == nil {
+		exists, err := s.repo.UnitExists(unitID)
+		if err != nil {
+			return models.PatrolGroup{}, nil, err
+		}
+		if !exists {
+			return models.PatrolGroup{}, nil, ErrUnitNotFound
+		}
+	}
+
+	group, err := s.EnsureGroupAt(unitID, time.Now())
 	if err != nil {
 		return group, nil, err
 	}
-	return s.GetGroup(group.ID)
+	return s.GetGroup(actor, group.ID)
 }
 
-func (s *service) GetItems(filter dto.ItemFilter) ([]models.PatrolListItem, int64, error) {
+func (s *service) GetItems(actor Actor, filter dto.ItemFilter) ([]models.PatrolListItem, int64, error) {
+	filter.UnitID = actor.scope().UnitFilter(filter.UnitID)
 	return s.repo.FindItems(filter)
 }
 
@@ -171,8 +199,14 @@ func (s *service) Scan(input ScanInput) (models.PatrolScan, bool, error) {
 		return existing, false, err
 	}
 
+	// Head office users do not patrol; officers only patrol their own unit.
+	if input.UnitID == nil {
+		return models.PatrolScan{}, false, ErrScanNeedsUnit
+	}
+	unitID := *input.UnitID
+
 	now := time.Now()
-	settings := settingservice.Current()
+	settings := settingservice.ForUnit(input.UnitID)
 	scannedAt := now
 	if input.ScannedAt != nil {
 		scannedAt = *input.ScannedAt
@@ -198,8 +232,11 @@ func (s *service) Scan(input ScanInput) (models.PatrolScan, bool, error) {
 	if err != nil {
 		return models.PatrolScan{}, false, err
 	}
+	if point.UnitID != unitID {
+		return models.PatrolScan{}, false, ErrPointOfOtherUnit
+	}
 
-	group, err := s.EnsureGroupAt(scannedAt)
+	group, err := s.EnsureGroupAt(unitID, scannedAt)
 	if err != nil {
 		return models.PatrolScan{}, false, err
 	}
@@ -297,6 +334,7 @@ func canSeeAllScans(actor Actor) bool {
 }
 
 func (s *service) GetScans(actor Actor, filter dto.ScanFilter) ([]models.PatrolScan, int64, error) {
+	filter.UnitID = actor.scope().UnitFilter(filter.UnitID)
 	if !canSeeAllScans(actor) {
 		filter.ScannedBy = actor.UserID
 	}
@@ -307,6 +345,7 @@ func (s *service) ExportScans(actor Actor, filter dto.ScanFilter) ([]models.Patr
 	if filter.DateFrom != "" && filter.DateTo != "" && filter.DateFrom > filter.DateTo {
 		return nil, ErrDateRangeInvalid
 	}
+	filter.UnitID = actor.scope().UnitFilter(filter.UnitID)
 	if !canSeeAllScans(actor) {
 		filter.ScannedBy = actor.UserID
 	}
@@ -321,8 +360,8 @@ func (s *service) ExportScans(actor Actor, filter dto.ScanFilter) ([]models.Patr
 	return scans, nil
 }
 
-func (s *service) FilterNames(filter dto.ScanFilter) (string, string, string, error) {
-	return s.repo.FilterNames(filter.ShiftID, filter.PatrolPointID, filter.ScannedBy)
+func (s *service) FilterNames(filter dto.ScanFilter) (repository.FilterNames, error) {
+	return s.repo.FilterNames(filter.UnitID, filter.ShiftID, filter.PatrolPointID, filter.ScannedBy)
 }
 
 func (s *service) GetScan(actor Actor, id int64) (models.PatrolScan, error) {
@@ -335,6 +374,9 @@ func (s *service) GetScan(actor Actor, id int64) (models.PatrolScan, error) {
 	}
 
 	if !canSeeAllScans(actor) && scan.ScannedBy != actor.UserID {
+		return models.PatrolScan{}, ErrScanNotFound
+	}
+	if !actor.scope().CanAccessUnit(scan.PatrolGroup.UnitID) {
 		return models.PatrolScan{}, ErrScanNotFound
 	}
 	return scan, nil

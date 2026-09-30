@@ -7,6 +7,7 @@ import (
 	"secure-patrol-backend/models"
 	rolerepository "secure-patrol-backend/modules/role/repository"
 	settingservice "secure-patrol-backend/modules/setting/service"
+	unitrepository "secure-patrol-backend/modules/unit/repository"
 	"secure-patrol-backend/modules/user/dto"
 	"secure-patrol-backend/modules/user/repository"
 	"secure-patrol-backend/pkg/facedetect"
@@ -21,28 +22,39 @@ const facePhotoDir = "faces"
 type service struct {
 	repo     repository.UserRepository
 	roleRepo rolerepository.RoleRepository
+	unitRepo unitrepository.UnitRepository
 }
 
 func NewUserService(
 	repo repository.UserRepository,
 	roleRepo rolerepository.RoleRepository,
+	unitRepo unitrepository.UnitRepository,
 ) UserService {
 	return &service{
 		repo:     repo,
 		roleRepo: roleRepo,
+		unitRepo: unitRepo,
 	}
 }
 
+// GetUsers expects the filter to be limited to the actor's unit by the caller.
 func (s *service) GetUsers(filter dto.UserFilter) ([]models.User, int64, error) {
 	return s.repo.FindAll(filter)
 }
 
-func (s *service) GetUserByID(id int64) (models.User, error) {
+func (s *service) GetUserByID(actor Actor, id int64) (models.User, error) {
 	user, err := s.repo.FindByID(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return user, ErrUserNotFound
 	}
-	return user, err
+	if err != nil {
+		return user, err
+	}
+	// Users of other units (and head office users) do not exist for a unit manager.
+	if actor.UnitID != nil && (user.UnitID == nil || *user.UnitID != *actor.UnitID) {
+		return models.User{}, ErrUserNotFound
+	}
+	return user, nil
 }
 
 func (s *service) CreateUser(actor Actor, user models.User, password string, facePhoto *multipart.FileHeader) (models.User, error) {
@@ -57,7 +69,13 @@ func (s *service) CreateUser(actor Actor, user models.User, password string, fac
 		return user, err
 	}
 
-	if err := s.checkAssignableRole(actor, user.RoleID); err != nil {
+	role, err := s.checkAssignableRole(actor, user.RoleID)
+	if err != nil {
+		return user, err
+	}
+
+	user.UnitID, err = s.resolveUnit(actor, role, user.UnitID)
+	if err != nil {
 		return user, err
 	}
 
@@ -70,7 +88,7 @@ func (s *service) CreateUser(actor Actor, user models.User, password string, fac
 		return user, err
 	}
 
-	photoPath, err := saveFacePhoto(facePhoto)
+	photoPath, err := saveFacePhoto(facePhoto, user.UnitID)
 	if err != nil {
 		return user, err
 	}
@@ -93,7 +111,7 @@ func (s *service) CreateUser(actor Actor, user models.User, password string, fac
 }
 
 func (s *service) UpdateUser(actor Actor, id int64, input models.User, facePhoto *multipart.FileHeader) (models.User, error) {
-	user, err := s.GetUserByID(id)
+	user, err := s.GetUserByID(actor, id)
 	if err != nil {
 		return user, err
 	}
@@ -102,14 +120,26 @@ func (s *service) UpdateUser(actor Actor, id int64, input models.User, facePhoto
 		return user, err
 	}
 
-	if actor.UserID == user.ID && (!input.IsActive || input.RoleID != user.RoleID) {
-		return user, ErrCannotModifySelf
-	}
-
+	role := user.Role
 	if input.RoleID != user.RoleID {
-		if err := s.checkAssignableRole(actor, input.RoleID); err != nil {
+		if role, err = s.checkAssignableRole(actor, input.RoleID); err != nil {
 			return user, err
 		}
+	}
+
+	// Keep the current unit when the form does not send one.
+	requestedUnit := input.UnitID
+	if requestedUnit == nil {
+		requestedUnit = user.UnitID
+	}
+	unitID, err := s.resolveUnit(actor, role, requestedUnit)
+	if err != nil {
+		return user, err
+	}
+	unitChanged := !sameUnit(unitID, user.UnitID)
+
+	if actor.UserID == user.ID && (!input.IsActive || input.RoleID != user.RoleID || unitChanged) {
+		return user, ErrCannotModifySelf
 	}
 
 	email := normalizeEmail(input.Email)
@@ -121,7 +151,7 @@ func (s *service) UpdateUser(actor Actor, id int64, input models.User, facePhoto
 
 	oldPhotoPath := user.FacePhotoPath
 	if facePhoto != nil {
-		photoPath, err := saveFacePhoto(facePhoto)
+		photoPath, err := saveFacePhoto(facePhoto, unitID)
 		if err != nil {
 			return user, err
 		}
@@ -131,11 +161,13 @@ func (s *service) UpdateUser(actor Actor, id int64, input models.User, facePhoto
 	}
 
 	// Sessions must be dropped when access is reduced so the change applies immediately.
-	revokeSessions := (user.IsActive && !input.IsActive) || input.RoleID != user.RoleID
+	revokeSessions := (user.IsActive && !input.IsActive) || input.RoleID != user.RoleID || unitChanged
 
 	user.Name = strings.TrimSpace(input.Name)
 	user.Email = email
 	user.RoleID = input.RoleID
+	user.UnitID = unitID
+	user.Unit = nil
 	user.IsActive = input.IsActive
 
 	if err := s.repo.Update(&user); err != nil {
@@ -162,7 +194,7 @@ func (s *service) UpdateUser(actor Actor, id int64, input models.User, facePhoto
 }
 
 func (s *service) DeleteUser(actor Actor, id int64) error {
-	user, err := s.GetUserByID(id)
+	user, err := s.GetUserByID(actor, id)
 	if err != nil {
 		return err
 	}
@@ -180,7 +212,7 @@ func (s *service) DeleteUser(actor Actor, id int64) error {
 }
 
 func (s *service) ResetPassword(actor Actor, id int64, password string) error {
-	user, err := s.GetUserByID(id)
+	user, err := s.GetUserByID(actor, id)
 	if err != nil {
 		return err
 	}
@@ -205,8 +237,8 @@ func (s *service) ResetPassword(actor Actor, id int64, password string) error {
 	return s.repo.RevokeSessions(user.ID)
 }
 
-func (s *service) GetFacePhotoPath(id int64) (string, error) {
-	user, err := s.GetUserByID(id)
+func (s *service) GetFacePhotoPath(actor Actor, id int64) (string, error) {
+	user, err := s.GetUserByID(actor, id)
 	if err != nil {
 		return "", err
 	}
@@ -218,34 +250,68 @@ func (s *service) GetFacePhotoPath(id int64) (string, error) {
 	return helper.StoragePath(user.FacePhotoPath)
 }
 
-// checkAssignableRole makes sure the role exists, is active, and that only a
-// Super-Admin can give out the Super-Admin role.
-func (s *service) checkAssignableRole(actor Actor, roleID int64) error {
+// checkAssignableRole makes sure the role exists, is active, and that only the
+// Super-Admin gives out head office roles (Super-Admin, Security Manager).
+func (s *service) checkAssignableRole(actor Actor, roleID int64) (models.Role, error) {
 	role, err := s.roleRepo.FindByID(roleID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrRoleInvalid
+		return role, ErrRoleInvalid
 	}
 	if err != nil {
-		return err
+		return role, err
 	}
 
 	if !role.IsActive {
-		return ErrRoleInvalid
+		return role, ErrRoleInvalid
 	}
 
-	if role.Code == models.RoleSuperAdmin && actor.RoleCode != models.RoleSuperAdmin {
+	if models.IsCentralRole(role.Code) && actor.RoleCode != models.RoleSuperAdmin {
+		return role, ErrForbiddenRole
+	}
+
+	return role, nil
+}
+
+// resolveUnit returns the unit a user with the role belongs to. Head office
+// roles have no unit. Unit managers can only place users in their own unit,
+// whatever was requested; the Super-Admin must pick an existing unit.
+func (s *service) resolveUnit(actor Actor, role models.Role, requested *int64) (*int64, error) {
+	if models.IsCentralRole(role.Code) {
+		return nil, nil
+	}
+
+	if actor.UnitID != nil {
+		unitID := *actor.UnitID
+		return &unitID, nil
+	}
+
+	if requested == nil || *requested <= 0 {
+		return nil, ErrUnitRequired
+	}
+	if _, err := s.unitRepo.FindByID(*requested); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUnitInvalid
+		}
+		return nil, err
+	}
+	unitID := *requested
+	return &unitID, nil
+}
+
+// checkManageableUser only lets the Super-Admin change head office accounts.
+// Unit managers only reach users of their own unit (see GetUserByID).
+func (s *service) checkManageableUser(actor Actor, user models.User) error {
+	if models.IsCentralRole(user.Role.Code) && actor.RoleCode != models.RoleSuperAdmin {
 		return ErrForbiddenRole
 	}
-
 	return nil
 }
 
-// checkManageableUser prevents non Super-Admin users from changing Super-Admin accounts.
-func (s *service) checkManageableUser(actor Actor, user models.User) error {
-	if user.Role.Code == models.RoleSuperAdmin && actor.RoleCode != models.RoleSuperAdmin {
-		return ErrForbiddenRole
+func sameUnit(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
 	}
-	return nil
+	return *a == *b
 }
 
 func (s *service) checkEmailAvailable(email string, exceptUserID int64) error {
@@ -268,14 +334,15 @@ func normalizeEmail(email string) string {
 
 // saveFacePhoto stores a reference face photo after checking it contains
 // exactly one large, frontal face, so the mobile app can match against it.
-// A rejected photo is never written to storage.
-func saveFacePhoto(file *multipart.FileHeader) (string, error) {
+// A rejected photo is never written to storage. The checks use the settings of
+// the user's unit.
+func saveFacePhoto(file *multipart.FileHeader, unitID *int64) (string, error) {
 	data, ext, err := helper.ReadImage(file)
 	if err != nil {
 		return "", err
 	}
 
-	settings := settingservice.Current()
+	settings := settingservice.ForUnit(unitID)
 	if settings.FacePhotoValidation {
 		options := facedetect.Options{
 			MinFaceRatio:   settings.FaceMinSizeRatio,

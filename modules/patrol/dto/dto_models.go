@@ -10,6 +10,13 @@ type ProgressDTO struct {
 	AbnormalScans   int64 `json:"abnormal_scans"`
 }
 
+// UnitSummaryDTO is the unit a patrol group belongs to.
+type UnitSummaryDTO struct {
+	ID   int64  `json:"id"`
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
 type ShiftSummaryDTO struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
@@ -17,6 +24,7 @@ type ShiftSummaryDTO struct {
 
 type PatrolGroupDTO struct {
 	ID        int64           `json:"id"`
+	Unit      UnitSummaryDTO  `json:"unit"`
 	Shift     ShiftSummaryDTO `json:"shift"`
 	ShiftDate string          `json:"shift_date"`
 	StartAt   time.Time       `json:"start_at"`
@@ -33,6 +41,8 @@ type PatrolGroupDetailDTO struct {
 
 type GroupSummaryDTO struct {
 	ID        int64     `json:"id"`
+	UnitID    int64     `json:"unit_id"`
+	UnitName  string    `json:"unit_name"`
 	ShiftID   int64     `json:"shift_id"`
 	ShiftName string    `json:"shift_name"`
 	ShiftDate string    `json:"shift_date"`

@@ -30,12 +30,12 @@ func TestDefaultValues(t *testing.T) {
 
 func TestInvalidStoredValueFallsBackToDefault(t *testing.T) {
 	var warned []string
-	v := buildValues(map[string]string{
+	v := buildValues([]map[string]string{{
 		"patrol_location_radius_meters": "0",     // below minimum
 		"login_max_failed_attempts":     "abc",   // not a number
 		"face_photo_validation":         "maybe", // not a boolean
 		"access_token_ttl_minutes":      "15",    // valid
-	}, func(key, value string, err error) { warned = append(warned, key) })
+	}}, func(key, value string, err error) { warned = append(warned, key) })
 
 	if v.PatrolLocationRadiusMeters != 100 || v.LoginMaxFailedAttempts != 3 || !v.FacePhotoValidation {
 		t.Errorf("invalid values must fall back to defaults: %+v", v)
@@ -99,5 +99,21 @@ func TestPublicMapHasOnlyAppSettings(t *testing.T) {
 		if keys[i] != want[i] {
 			t.Fatalf("got %v, want %v", keys, want)
 		}
+	}
+}
+
+func TestUnitOverridesGlobal(t *testing.T) {
+	global := map[string]string{"patrol_location_radius_meters": "150", "login_lock_minutes": "10"}
+	unit := map[string]string{"patrol_location_radius_meters": "50", "login_lock_minutes": "oops"}
+
+	v := buildValues([]map[string]string{global, unit}, nil)
+	if v.PatrolLocationRadiusMeters != 50 {
+		t.Errorf("unit override must win, got %v", v.PatrolLocationRadiusMeters)
+	}
+	if v.LoginLockMinutes != 10 {
+		t.Errorf("invalid unit value must fall back to the global value, got %v", v.LoginLockMinutes)
+	}
+	if v.LoginMaxFailedAttempts != 3 {
+		t.Errorf("unset everywhere must use the code default, got %v", v.LoginMaxFailedAttempts)
 	}
 }

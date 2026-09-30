@@ -40,7 +40,7 @@ func (s *service) Login(email string, password string, client ClientInfo) (Token
 	if !helper.CheckPassword(user.PasswordHash, password) {
 		failedCount := user.FailedLoginCount + 1
 		var lockedUntil *time.Time
-		settings := settingservice.Current()
+		settings := settingservice.ForUnit(user.UnitID)
 		if failedCount >= settings.LoginMaxFailedAttempts {
 			until := now.Add(settings.LoginLockDuration())
 			lockedUntil = &until
@@ -60,6 +60,9 @@ func (s *service) Login(email string, password string, client ClientInfo) (Token
 	// Checked after the password so inactive accounts cannot be enumerated.
 	if !user.IsActive || !user.Role.IsActive {
 		return TokenPair{}, ErrAccountInactive
+	}
+	if !UnitIsUsable(user) {
+		return TokenPair{}, ErrUnitInactive
 	}
 
 	// Checked after the password, so the answer does not reveal the role of an account.
@@ -89,7 +92,7 @@ func (s *service) Login(email string, password string, client ClientInfo) (Token
 		RefreshTokenHash: helper.SHA256Hex([]byte(refreshSecret)),
 		UserAgent:        truncate(client.UserAgent, 255),
 		IPAddress:        truncate(client.IPAddress, 45),
-		ExpiresAt:        now.Add(settingservice.Current().RefreshTokenTTL()),
+		ExpiresAt:        now.Add(settingservice.ForUnit(user.UnitID).RefreshTokenTTL()),
 		LastUsedAt:       now,
 	}
 
@@ -135,6 +138,9 @@ func (s *service) Refresh(refreshToken string, client ClientInfo) (TokenPair, er
 	if err != nil || !user.IsActive || !user.Role.IsActive {
 		return TokenPair{}, ErrSessionInvalid
 	}
+	if !UnitIsUsable(user) {
+		return TokenPair{}, ErrUnitInactive
+	}
 
 	if !models.RoleCanUsePlatform(user.Role.Code, client.AppPlatform) {
 		return TokenPair{}, ErrPlatformNotAllowed
@@ -145,7 +151,7 @@ func (s *service) Refresh(refreshToken string, client ClientInfo) (TokenPair, er
 		return TokenPair{}, err
 	}
 
-	session.ExpiresAt = now.Add(settingservice.Current().RefreshTokenTTL())
+	session.ExpiresAt = now.Add(settingservice.ForUnit(user.UnitID).RefreshTokenTTL())
 	if err := s.repo.RotateSessionToken(session.ID, helper.SHA256Hex([]byte(newSecret)), session.ExpiresAt, now); err != nil {
 		return TokenPair{}, err
 	}
@@ -181,6 +187,10 @@ func (s *service) Authenticate(accessToken string, appID string, appPlatform str
 	if err != nil || !user.IsActive || !user.Role.IsActive {
 		return Principal{}, ErrSessionInvalid
 	}
+	// Checked on every request so deactivating a unit signs its users out at once.
+	if !UnitIsUsable(user) {
+		return Principal{}, ErrUnitInactive
+	}
 
 	// Re-checked on every request so the rule also applies to tokens issued
 	// before it existed or before the role changed.
@@ -192,6 +202,7 @@ func (s *service) Authenticate(accessToken string, appID string, appPlatform str
 		UserID:    user.ID,
 		RoleCode:  user.Role.Code,
 		SessionID: session.ID,
+		UnitID:    user.UnitID,
 	}, nil
 }
 
@@ -231,7 +242,7 @@ func (s *service) ChangePassword(userID int64, sessionID string, oldPassword str
 }
 
 func (s *service) issueTokens(user models.User, session models.UserSession, refreshSecret string, appID string, now time.Time) (TokenPair, error) {
-	accessExpiresAt := now.Add(settingservice.Current().AccessTokenTTL())
+	accessExpiresAt := now.Add(settingservice.ForUnit(user.UnitID).AccessTokenTTL())
 
 	accessToken, err := helper.GenerateAccessToken(helper.AccessTokenClaims{
 		Subject:   user.ID,

@@ -26,6 +26,9 @@ func (r *repository) FindAll(filter dto.AuditLogFilter, from *time.Time, to *tim
 	if filter.UserID > 0 {
 		query = query.Where("user_id = ?", filter.UserID)
 	}
+	if filter.UnitID > 0 {
+		query = query.Where("unit_id = ?", filter.UnitID)
+	}
 	if filter.Action != "" {
 		query = query.Where("action = ?", filter.Action)
 	}

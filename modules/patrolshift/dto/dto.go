@@ -21,6 +21,7 @@ func (d *dto) ToPatrolShiftDTO(shift models.PatrolShift) PatrolShiftDTO {
 
 	return PatrolShiftDTO{
 		ID:              shift.ID,
+		UnitID:          shift.UnitID,
 		Name:            shift.Name,
 		StartTime:       shift.StartTime,
 		EndTime:         shift.EndTime,

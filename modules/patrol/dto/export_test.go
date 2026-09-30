@@ -21,7 +21,7 @@ func TestBuildScanExcel(t *testing.T) {
 			ScannedAt:      scannedAt,
 			ReceivedAt:     scannedAt.Add(2 * time.Second),
 			Condition:      models.PatrolConditionNormal,
-			PatrolGroup:    models.PatrolGroup{ShiftName: "Shift 1", ShiftDate: shiftDate},
+			PatrolGroup:    models.PatrolGroup{UnitName: "Unit Utama", ShiftName: "Shift 1", ShiftDate: shiftDate},
 			PatrolListItem: models.PatrolListItem{Name: "Main Gate", Location: "Building A"},
 			ScannedByUser:  models.User{Name: "Budi", Email: "budi@securepatrol.local"},
 		},
@@ -30,7 +30,7 @@ func TestBuildScanExcel(t *testing.T) {
 			ReceivedAt:     scannedAt.Add(3 * time.Hour), // sent later from the phone
 			Condition:      models.PatrolConditionAbnormal,
 			Note:           "Pintu tidak terkunci",
-			PatrolGroup:    models.PatrolGroup{ShiftName: "Shift 1", ShiftDate: shiftDate},
+			PatrolGroup:    models.PatrolGroup{UnitName: "Unit Utama", ShiftName: "Shift 1", ShiftDate: shiftDate},
 			PatrolListItem: models.PatrolListItem{Name: "Server Room", Location: "Building A - 3rd Floor"},
 			ScannedByUser: models.User{
 				Name:      "Andi",
@@ -59,9 +59,9 @@ func TestBuildScanExcel(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Shift", "Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas"},
-		{"29/09/2026 08:15:30", "29/09/2026 08:15:32", "Tidak", "29/09/2026", "Shift 1", "Main Gate", "Building A", "Normal", "", "Budi", "budi@securepatrol.local"},
-		{"29/09/2026 08:15:30", "29/09/2026 11:15:30", "Ya", "29/09/2026", "Shift 1", "Server Room", "Building A - 3rd Floor", "Tidak Normal", "Pintu tidak terkunci", "Andi (akun dihapus)", "andi@securepatrol.local"},
+		{"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Unit", "Shift", "Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas"},
+		{"29/09/2026 08:15:30", "29/09/2026 08:15:32", "Tidak", "29/09/2026", "Unit Utama", "Shift 1", "Main Gate", "Building A", "Normal", "", "Budi", "budi@securepatrol.local"},
+		{"29/09/2026 08:15:30", "29/09/2026 11:15:30", "Ya", "29/09/2026", "Unit Utama", "Shift 1", "Server Room", "Building A - 3rd Floor", "Tidak Normal", "Pintu tidak terkunci", "Andi (akun dihapus)", "andi@securepatrol.local"},
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %v", len(rows), len(want), rows)
@@ -90,7 +90,7 @@ func TestBuildScanExcel(t *testing.T) {
 			summary[r[0]] = r[1]
 		}
 	}
-	for key, value := range map[string]string{"Diekspor oleh": "Super Admin", "Shift": "Shift 1", "Titik": "Semua", "Jumlah data": "2"} {
+	for key, value := range map[string]string{"Diekspor oleh": "Super Admin", "Unit": "Semua", "Shift": "Shift 1", "Titik": "Semua", "Jumlah data": "2"} {
 		if summary[key] != value {
 			t.Errorf("filter sheet %q: got %q, want %q", key, summary[key], value)
 		}

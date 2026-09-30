@@ -15,16 +15,17 @@ import (
 const OfflineThreshold = 5 * time.Minute
 
 var scanExportHeaders = []string{
-	"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Shift",
+	"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Unit", "Shift",
 	"Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas",
 }
 
-var scanExportColumnWidths = []float64{20, 20, 15, 14, 14, 26, 30, 14, 45, 26, 32}
+var scanExportColumnWidths = []float64{20, 20, 15, 14, 24, 14, 26, 30, 14, 45, 26, 32}
 
 // ScanExportMeta describes the export for the "Filter" sheet.
 type ScanExportMeta struct {
 	ExportedAt time.Time
 	ExportedBy string
+	Unit       string
 	Shift      string
 	Point      string
 	Officer    string
@@ -124,6 +125,7 @@ func BuildScanExcel(scans []models.PatrolScan, meta ScanExportMeta) ([]byte, err
 			excelize.Cell{StyleID: dateTimeStyle, Value: excelTime(scan.ReceivedAt, meta.Location)},
 			offline,
 			excelize.Cell{StyleID: dateStyle, Value: time.Date(shiftDate.Year(), shiftDate.Month(), shiftDate.Day(), 0, 0, 0, 0, time.UTC)},
+			scan.PatrolGroup.UnitName,
 			scan.PatrolGroup.ShiftName,
 			scan.PatrolListItem.Name,
 			scan.PatrolListItem.Location,
@@ -182,6 +184,7 @@ func writeFilterSheet(f *excelize.File, rows int, meta ScanExportMeta) error {
 	lines := [][]interface{}{
 		{"Diekspor pada", meta.ExportedAt.In(meta.Location).Format("02/01/2006 15:04:05") + " (" + meta.Location.String() + ")"},
 		{"Diekspor oleh", meta.ExportedBy},
+		{"Unit", orAll(meta.Unit)},
 		{"Shift", orAll(meta.Shift)},
 		{"Titik", orAll(meta.Point)},
 		{"Petugas", orAll(meta.Officer)},

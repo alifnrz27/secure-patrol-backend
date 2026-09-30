@@ -22,7 +22,7 @@ func BearerAuth(authService service.AuthService) fiber.Handler {
 		}
 
 		principal, err := authService.Authenticate(authHeader[7:], helper.CurrentAppID(c), helper.CurrentAppPlatform(c))
-		if errors.Is(err, service.ErrPlatformNotAllowed) {
+		if errors.Is(err, service.ErrPlatformNotAllowed) || errors.Is(err, service.ErrUnitInactive) {
 			response := helper.APIResponse("Forbidden", http.StatusForbidden, "Error", err.Error())
 			return c.Status(http.StatusForbidden).JSON(response)
 		}
@@ -42,6 +42,7 @@ func BearerAuth(authService service.AuthService) fiber.Handler {
 		c.Locals(helper.LocalUserID, principal.UserID)
 		c.Locals(helper.LocalRoleCode, principal.RoleCode)
 		c.Locals(helper.LocalSessionID, principal.SessionID)
+		c.Locals(helper.LocalUnitID, principal.UnitID)
 
 		return c.Next()
 	}
