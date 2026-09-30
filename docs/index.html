@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Secure Patrol API Docs</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #fafafa; }
+    .dev-banner {
+      padding: 8px 16px;
+      background: #b45309;
+      color: #fff;
+      font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="dev-banner">DEVELOPMENT ONLY. Halaman ini tidak tersedia di staging dan production.</div>
+  <div id="swagger-ui"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script src="/docs/signer.js"></script>
+  <script>
+    var tokenPaths = ['/api/v1/auth/login', '/api/v1/auth/refresh'];
+
+    var ui = SwaggerUIBundle({
+      url: '/docs/openapi.yaml',
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      persistAuthorization: true,
+      displayRequestDuration: true,
+      tryItOutEnabled: true,
+      requestInterceptor: function (req) {
+        return window.SecurePatrolSigner.signRequest(req);
+      },
+      responseInterceptor: function (res) {
+        // Put the new access token into BearerAuth after login / refresh.
+        try {
+          var path = new URL(res.url, window.location.href).pathname;
+          var token = res.ok && res.body && res.body.data && res.body.data.access_token;
+          if (token && tokenPaths.indexOf(path) !== -1) {
+            ui.preauthorizeApiKey('BearerAuth', token);
+          }
+        } catch (e) {
+          console.warn('auto authorize failed', e);
+        }
+        return res;
+      },
+    });
+  </script>
+</body>
+</html>

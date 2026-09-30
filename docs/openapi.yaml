@@ -1,0 +1,2027 @@
+openapi: 3.0.3
+info:
+  title: Secure Patrol API
+  version: 1.0.0
+  description: |
+    Dokumentasi API Secure Patrol. **Hanya tersedia di environment development** (`APP_ENV=development`).
+
+    ## Cara mencoba API di halaman ini
+    1. Klik **Authorize**, isi **AppId** (`X-App-Id`) dan **AppKey**. App Key hanya dipakai browser untuk
+       menandatangani request dan **tidak pernah dikirim** ke server.
+    2. Panggil `POST /auth/login`. Access token otomatis dipasang ke **BearerAuth**.
+    3. Endpoint lain siap dicoba.
+
+    Belum punya App ID/Key? Jalankan `go run . create-app-client -name "Dev Docs" -platform web`.
+
+    ## Keamanan request
+    Setiap request ke `/api/v1` wajib ditandatangani dengan header `X-App-Id`, `X-Timestamp`, `X-Nonce`, dan
+    `X-Signature`. Halaman ini membuat ketiga header terakhir secara otomatis.
+
+    ```
+    payload   = METHOD \n REQUEST_URI \n TIMESTAMP \n NONCE \n SHA256_HEX(BODY)
+    signature = HEX(HMAC_SHA256(APP_KEY, payload))
+    ```
+
+    Detail lengkap dan contoh kode mobile ada di `docs/AUTH.md`.
+
+    ## Pembatasan platform
+    **Login per platform:** App Client `android` dan `ios` bisa dipakai semua role. App Client `web` (dan `server`)
+    hanya untuk Super-Admin, Manager Keamanan, Kepala Keamanan, dan Admin Keamanan; role lain mendapat `403`
+    `your role is not allowed to sign in on this platform` saat login, refresh, maupun request berikutnya.
+
+    User management, role management, dan app client management **hanya bisa diakses dari App Client
+    platform `web`**. Dari platform lain (android, ios, server) endpoint tersebut mengembalikan `403`
+    dengan pesan `This feature is only available on the web platform`. Hal yang sama berlaku untuk
+    membuat, mengubah, dan menghapus patrol point dan patrol shift.
+
+    Sebaliknya, `POST /patrol-scans` **hanya bisa dari platform `android` atau `ios`**.
+
+    ## Penghapusan data
+    Semua endpoint `DELETE` melakukan **soft delete**: data disembunyikan dari API tetapi tetap tersimpan di
+    database (kolom `deleted_at`). Nilai unik milik data yang dihapus (email user, kode NFC, kode role) dilepas
+    sehingga bisa dipakai lagi, dan history patroli tetap menampilkan user yang sudah dihapus.
+
+    ## Format response
+    Semua response JSON dibungkus dalam `{ "meta": { "message", "code", "status" }, "data": ... }`.
+servers:
+  - url: /api/v1
+tags:
+  - name: Auth
+    description: Login, token, dan profil user yang sedang login
+  - name: Roles
+    description: Manajemen role
+  - name: Users
+    description: Manajemen user
+  - name: App Clients
+    description: Manajemen App ID & App Key (Super-Admin)
+  - name: Patrol Points
+    description: Titik patroli yang dipindai petugas melalui tag NFC
+  - name: Patrol Shifts
+    description: Pengaturan shift (jam mulai dan batas akhir/cut-off)
+  - name: Patrol Groups
+    description: Group patroli otomatis per shift per tanggal, beserta daftar patroli (salinan NFC)
+  - name: Patrol Scans
+    description: Scan NFC oleh petugas dan history scan
+  - name: Help Desk
+    description: Aturan, tata cara penggunaan, dan FAQ untuk petugas
+  - name: Audit Log
+    description: Riwayat create, update, dan delete (siapa, kapan, dari IP mana)
+  - name: Settings
+    description: Pengaturan sistem yang bisa diubah tanpa restart (disimpan di database)
+security:
+  - AppId: []
+    AppKey: []
+    BearerAuth: []
+
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      summary: Login dengan email dan password
+      description: |
+        Akun terkunci setelah `login_max_failed_attempts` kali salah password berturut-turut (default 3) selama
+        `login_lock_minutes` menit (default 5); keduanya diatur di `/settings`. Response 429 berisi `data.locked_until`,
+        `data.retry_after_seconds`, dan header `Retry-After`. Response berisi `settings` (7 setting untuk aplikasi).
+        Response login menyertakan foto wajah user dalam base64 (`user.face_photo_base64` dan
+        `user.face_photo_mime_type`). Pada `/auth/refresh` kedua field ini selalu `null`.
+      security:
+        - AppId: []
+          AppKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: 'Akun tidak aktif, atau role tidak boleh login di platform App Client ini (misalnya Tim Keamanan di web)', content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { description: Akun terkunci sementara, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [Auth]
+      summary: Tukar refresh token dengan pasangan token baru
+      description: |
+        Refresh token hanya bisa dipakai sekali. Simpan refresh token baru dari response.
+        Memakai refresh token lama akan mematikan seluruh session.
+      security:
+        - AppId: []
+          AppKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Token baru
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/me:
+    get:
+      operationId: getProfile
+      tags: [Auth]
+      summary: Profil user yang sedang login
+      description: Berisi data user beserta `settings` (7 setting untuk aplikasi).
+      responses:
+        '200':
+          description: Profil user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /app-config:
+    get:
+      operationId: getAppConfig
+      tags: [Auth]
+      summary: Pengaturan untuk aplikasi mobile
+      description: 'Isi sama dengan `config` pada response login dan refresh. Panggil saat aplikasi dibuka dengan sesi tersimpan.'
+      responses:
+        '200':
+          description: Pengaturan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AppConfig' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me/face-photo:
+    get:
+      operationId: getMyFacePhoto
+      tags: [Auth]
+      summary: Foto wajah user yang sedang login
+      responses:
+        '200': { $ref: '#/components/responses/Image' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Logout dari perangkat ini
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout-all:
+    post:
+      operationId: logoutAll
+      tags: [Auth]
+      summary: Logout dari semua perangkat
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/change-password:
+    put:
+      operationId: changePassword
+      tags: [Auth]
+      summary: Ganti password sendiri
+      description: Semua perangkat lain otomatis logout; perangkat ini tetap login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /roles:
+    get:
+      operationId: listRoles
+      tags: [Roles]
+      summary: Daftar role
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Admin Keamanan.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Daftar role
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Role' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createRole
+      tags: [Roles]
+      summary: Tambah role
+      description: '**Hanya platform web.** Akses: Super-Admin.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Role dibuat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /roles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getRole
+      tags: [Roles]
+      summary: Detail role
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Admin Keamanan.'
+      responses:
+        '200':
+          description: Detail role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateRole
+      tags: [Roles]
+      summary: Ubah role
+      description: '**Hanya platform web.** Akses: Super-Admin. Kode role tidak bisa diubah; role sistem tidak bisa dinonaktifkan.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Role diubah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      operationId: deleteRole
+      tags: [Roles]
+      summary: Hapus role (soft delete)
+      description: '**Hanya platform web.** Akses: Super-Admin. Role sistem dan role yang masih dipakai user tidak bisa dihapus. Kode role yang dihapus bisa dipakai lagi.'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: Daftar user
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Admin Keamanan.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: role_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: is_active
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Daftar user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/User' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Tambah user
+      description: |
+        **Hanya platform web.**
+        Akses: Super-Admin, Manager Keamanan, Admin Keamanan.
+        Hanya Super-Admin yang bisa membuat user dengan role Super-Admin.
+        Foto wajah wajib, JPEG/PNG maksimal 5 MB, dan diperiksa server sebelum disimpan: harus berisi **tepat satu
+        wajah**, cukup besar (minimal 20% sisi pendek foto), dan **menghadap kamera** dengan kedua mata terlihat.
+        Orientasi EXIF foto HP diperhitungkan.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User dibuat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/FacePhotoRejected' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getUser
+      tags: [Users]
+      summary: Detail user
+      description: '**Hanya platform web.**'
+      responses:
+        '200':
+          description: Detail user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateUser
+      tags: [Users]
+      summary: Ubah user
+      description: |
+        **Hanya platform web.**
+        Foto wajah opsional; jika dikirim, foto diperiksa seperti saat membuat user dan foto lama diganti.
+        Jika foto ditolak, tidak ada data yang berubah.
+        Menonaktifkan user atau mengganti role-nya langsung mematikan semua session user tersebut.
+        User tidak bisa menonaktifkan atau mengganti role akunnya sendiri.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User diubah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/FacePhotoRejected' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+    delete:
+      operationId: deleteUser
+      tags: [Users]
+      summary: Hapus user (soft delete)
+      description: '**Hanya platform web.** Email user yang dihapus bisa dipakai lagi untuk user baru.'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /users/{id}/face-photo:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getUserFacePhoto
+      tags: [Users]
+      summary: Foto wajah user
+      description: '**Hanya platform web.**'
+      responses:
+        '200': { $ref: '#/components/responses/Image' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{id}/reset-password:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      operationId: resetUserPassword
+      tags: [Users]
+      summary: Reset password user
+      description: '**Hanya platform web.** Juga membuka kunci akun dan mematikan semua session user tersebut.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /app-clients:
+    get:
+      operationId: listAppClients
+      tags: [App Clients]
+      summary: Daftar app client
+      description: '**Hanya platform web.**'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Daftar app client
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/AppClient' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createAppClient
+      tags: [App Clients]
+      summary: Buat app client (App ID + App Key)
+      description: '**Hanya platform web.** App Key hanya ditampilkan sekali di response ini.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppClientRequest'
+      responses:
+        '201':
+          description: App client dibuat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppClientCredentialResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /app-clients/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getAppClient
+      tags: [App Clients]
+      summary: Detail app client
+      description: '**Hanya platform web.**'
+      responses:
+        '200':
+          description: Detail app client (tanpa App Key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppClientResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateAppClient
+      tags: [App Clients]
+      summary: Ubah app client
+      description: '**Hanya platform web.** App client yang sedang dipakai untuk request ini tidak bisa dinonaktifkan.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppClientRequest'
+      responses:
+        '200':
+          description: App client diubah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppClientResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      operationId: deleteAppClient
+      tags: [App Clients]
+      summary: Hapus app client (soft delete)
+      description: '**Hanya platform web.** App client yang sedang dipakai untuk request ini tidak bisa dihapus.'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /app-clients/{id}/rotate-key:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      operationId: rotateAppKey
+      tags: [App Clients]
+      summary: Rotasi App Key
+      description: |
+        **Hanya platform web.**
+        Membuat App Key baru. Selama `grace_period_hours`, key lama tetap diterima supaya aplikasi versi lama
+        tetap berjalan. Gunakan `0` untuk langsung mematikan key lama (misalnya jika key bocor).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotateKeyRequest'
+      responses:
+        '200':
+          description: App Key baru (hanya ditampilkan sekali)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppClientCredentialResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-points:
+    get:
+      operationId: listPatrolPoints
+      tags: [Patrol Points]
+      summary: Daftar patrol point
+      description: 'Semua user yang login, semua platform. Search mencari di nama, lokasi, dan kode NFC.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          description: Daftar patrol point, diurutkan berdasarkan nama
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/PatrolPoint' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createPatrolPoint
+      tags: [Patrol Points]
+      summary: Tambah patrol point
+      description: |
+        **Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.
+        Kode NFC disimpan dalam huruf besar dan harus unik.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePatrolPointRequest'
+      responses:
+        '201':
+          description: Patrol point dibuat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatrolPointResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-points/by-nfc:
+    get:
+      operationId: getPatrolPointByNfc
+      tags: [Patrol Points]
+      summary: Cari patrol point dari tag NFC yang dipindai
+      description: 'Semua user yang login, semua platform. Pencarian tidak membedakan huruf besar/kecil.'
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+          example: '04:A2:1F:9C'
+      responses:
+        '200':
+          description: Patrol point dari tag NFC tersebut
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatrolPointResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-points/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getPatrolPoint
+      tags: [Patrol Points]
+      summary: Detail patrol point
+      description: 'Semua user yang login, semua platform.'
+      responses:
+        '200':
+          description: Detail patrol point
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatrolPointResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updatePatrolPoint
+      tags: [Patrol Points]
+      summary: Ubah patrol point
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePatrolPointRequest'
+      responses:
+        '200':
+          description: Patrol point diubah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatrolPointResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      operationId: deletePatrolPoint
+      tags: [Patrol Points]
+      summary: Hapus patrol point (soft delete)
+      description: '**Hanya platform web.** Kode NFC patrol point yang dihapus bisa dipakai lagi.'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patrol-shifts:
+    get:
+      operationId: listPatrolShifts
+      tags: [Patrol Shifts]
+      summary: Daftar pengaturan shift
+      description: 'Semua user yang login, semua platform. Diurutkan berdasarkan jam mulai.'
+      responses:
+        '200':
+          description: Daftar shift
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/PatrolShift' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createPatrolShift
+      tags: [Patrol Shifts]
+      summary: Tambah shift
+      description: |
+        **Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.
+        Jam akhir adalah batas (cut-off): scan tepat di jam akhir atau sesudahnya masuk ke shift berikutnya.
+        Shift aktif tidak boleh tumpang tindih. Perubahan hanya berlaku untuk group berikutnya.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePatrolShiftRequest' }
+      responses:
+        '201':
+          description: Shift dibuat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolShiftResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Tumpang tindih dengan shift aktif lain, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-shifts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getPatrolShift
+      tags: [Patrol Shifts]
+      summary: Detail shift
+      responses:
+        '200':
+          description: Detail shift
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolShiftResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updatePatrolShift
+      tags: [Patrol Shifts]
+      summary: Ubah shift
+      description: '**Hanya platform web.** Group yang sudah dibuat tetap memakai jam lamanya.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdatePatrolShiftRequest' }
+      responses:
+        '200':
+          description: Shift diubah
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolShiftResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Tumpang tindih dengan shift aktif lain, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      operationId: deletePatrolShift
+      tags: [Patrol Shifts]
+      summary: Hapus shift (soft delete)
+      description: '**Hanya platform web.** History group dan scan dari shift ini tetap tersimpan.'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patrol-groups:
+    get:
+      operationId: listPatrolGroups
+      tags: [Patrol Groups]
+      summary: Daftar group patroli (per shift per tanggal) beserta progres
+      description: 'Semua user yang login, semua platform. Group dibuat otomatis saat shift dimulai.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/ShiftId'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+      responses:
+        '200':
+          description: Daftar group, terbaru dulu
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/PatrolGroup' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-groups/current:
+    get:
+      operationId: getCurrentPatrolGroup
+      tags: [Patrol Groups]
+      summary: Group yang sedang berjalan beserta daftar patroli
+      description: 'Untuk layar utama aplikasi mobile. Mengembalikan 422 jika tidak ada shift aktif saat ini.'
+      responses:
+        '200':
+          description: Group saat ini
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolGroupDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-groups/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getPatrolGroup
+      tags: [Patrol Groups]
+      summary: Detail group beserta daftar patroli
+      responses:
+        '200':
+          description: Detail group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolGroupDetailResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patrol-list-items:
+    get:
+      operationId: listPatrolListItems
+      tags: [Patrol Groups]
+      summary: Daftar titik patroli berdasarkan shift atau periode
+      description: 'Titik patroli (salinan NFC) dari group yang cocok dengan filter, beserta status scan-nya.'
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: group_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ShiftId'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+        - name: status
+          in: query
+          schema: { type: string, enum: [scanned, unscanned] }
+      responses:
+        '200':
+          description: Daftar titik patroli
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/PatrolListItem' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-scans:
+    post:
+      operationId: scanPatrolPoint
+      tags: [Patrol Scans]
+      summary: Scan NFC titik patroli
+      description: |
+        **Hanya platform android/ios.** Satu NFC boleh di-scan berkali-kali dalam shift yang sama.
+
+        - Shift ditentukan dari `scanned_at` (waktu scan di HP), sehingga scan offline yang dikirim belakangan
+          tetap masuk ke shift yang benar. Maksimal setting `patrol_max_offline_hours` (default 24 jam) ke belakang.
+        - `client_scan_id` unik per scan (misalnya UUID). Kirim ulang dengan ID yang sama tidak membuat data ganda
+          dan dijawab `200` berisi scan yang sudah tersimpan.
+        - Jika titik mewajibkan lokasi: jarak maksimal setting `patrol_location_radius_meters` (default 100 m), selebihnya ditolak.
+        - Jika titik mewajibkan wajah: `face_verified` harus `true` (pencocokan wajah dilakukan di HP dengan ambang
+          `face_mobile_accuracy`). Jika setting `face_match_min_score` lebih dari 0, `face_match_score` juga wajib dan
+          minimal sebesar nilai tersebut.
+        - `note` wajib jika `condition` = `abnormal`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/PatrolScanRequest' }
+            encoding:
+              photos:
+                contentType: image/jpeg, image/png
+      responses:
+        '200':
+          description: Scan dengan client_scan_id ini sudah pernah tersimpan (retry)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolScanResponse' }
+        '201':
+          description: Scan tersimpan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolScanResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: NFC tidak terdaftar sebagai titik patroli, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422':
+          description: |
+            Ditolak. Contoh pesan: `you are 240 m away from the patrol point, the maximum allowed distance is 100 m`,
+            `face validation is required for this patrol point and was not verified`,
+            `there is no active patrol shift at the scan time`, `scan is too old to be submitted`,
+            `a scan can have at most 3 photos`, `file size must not exceed 5 MB`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      operationId: listPatrolScans
+      tags: [Patrol Scans]
+      summary: History scan (per group, shift, periode, atau semua)
+      description: |
+        Tanpa filter mengembalikan seluruh history. Tim Keamanan hanya melihat scan miliknya sendiri;
+        role lain melihat semua. Diurutkan dari scan terbaru.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: group_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ShiftId'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+        - name: scanned_by
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: patrol_point_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: condition
+          in: query
+          schema: { type: string, enum: [normal, abnormal] }
+      responses:
+        '200':
+          description: History scan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/PatrolScan' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /patrol-scans/export:
+    get:
+      operationId: exportPatrolScans
+      tags: [Patrol Scans]
+      summary: Export Excel riwayat scan
+      description: |
+        **Hanya platform web.** Menghasilkan file `.xlsx` dengan sheet **Riwayat Scan** dan **Filter**.
+        Kolom: Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Shift, Titik, Lokasi, Kondisi, Catatan,
+        Petugas, Email petugas. Waktu ditulis sebagai tanggal Excel dalam zona waktu aplikasi (WIB), diurutkan dari
+        scan terlama. "Dikirim offline" = Ya jika diterima server lebih dari 5 menit setelah waktu scan.
+        Maksimal 50.000 baris per file.
+      parameters:
+        - $ref: '#/components/parameters/ShiftId'
+        - name: patrol_point_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: scanned_by
+          in: query
+          description: ID petugas
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+      responses:
+        '200':
+          description: File Excel
+          headers:
+            Content-Disposition:
+              schema: { type: string, example: 'attachment; filename="riwayat-scan_20260929-163000.xlsx"' }
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: '`date_from must not be after date_to`, format tanggal salah, atau lebih dari 50.000 baris'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /patrol-scans/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getPatrolScan
+      tags: [Patrol Scans]
+      summary: Detail scan
+      responses:
+        '200':
+          description: Detail scan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatrolScanResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patrol-scans/{id}/photos/{photo_id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: photo_id
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      operationId: getPatrolScanPhoto
+      tags: [Patrol Scans]
+      summary: Foto scan
+      responses:
+        '200': { $ref: '#/components/responses/Image' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /help-desk-articles:
+    get:
+      operationId: listHelpDeskArticles
+      tags: [Help Desk]
+      summary: Daftar artikel help desk (aturan, tata cara, FAQ)
+      description: |
+        Semua user yang login, semua platform. Diurutkan: `rule`, `guide`, lalu `faq`, kemudian `sort_order`.
+        Tim Keamanan hanya melihat artikel yang sudah dipublikasikan; role manajemen juga melihat draft.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Search'
+        - name: category
+          in: query
+          schema: { type: string, enum: [rule, guide, faq] }
+        - name: is_published
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Daftar artikel
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/HelpDeskArticle' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    post:
+      operationId: createHelpDeskArticle
+      tags: [Help Desk]
+      summary: Tambah artikel
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHelpDeskArticleRequest' }
+      responses:
+        '201':
+          description: Artikel dibuat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HelpDeskArticleResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /help-desk-articles/reorder:
+    put:
+      operationId: reorderHelpDeskArticles
+      tags: [Help Desk]
+      summary: Atur ulang urutan artikel dalam satu kategori
+      description: |
+        **Hanya platform web.** Untuk drag & drop di menu help desk. Kirim **semua** artikel kategori tersebut
+        (termasuk draft) dalam urutan baru; `sort_order` disusun ulang menjadi 1, 2, 3, dan seterusnya.
+        Daftar yang tidak lengkap, berisi ID ganda, atau berisi artikel dari kategori lain ditolak (422).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReorderHelpDeskArticlesRequest' }
+      responses:
+        '200':
+          description: Artikel kategori tersebut dalam urutan baru
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/HelpDeskArticle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /help-desk-articles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getHelpDeskArticle
+      tags: [Help Desk]
+      summary: Detail artikel
+      description: 'Draft mengembalikan 404 untuk Tim Keamanan.'
+      responses:
+        '200':
+          description: Detail artikel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HelpDeskArticleResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: updateHelpDeskArticle
+      tags: [Help Desk]
+      summary: Ubah artikel
+      description: '**Hanya platform web.**'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateHelpDeskArticleRequest' }
+      responses:
+        '200':
+          description: Artikel diubah
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HelpDeskArticleResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      operationId: deleteHelpDeskArticle
+      tags: [Help Desk]
+      summary: Hapus artikel (soft delete)
+      description: '**Hanya platform web.**'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [Audit Log]
+      summary: Riwayat create, update, dan delete
+      description: |
+        **Hanya platform web.** Akses: Super-Admin dan Manager Keamanan.
+        Dicatat otomatis untuk setiap request POST/PUT/DELETE yang berhasil (tidak termasuk login, refresh, dan logout),
+        serta pembuatan data lewat CLI (`source = "cli"`). Isi request tidak disimpan. Terbaru dulu.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: search
+          in: query
+          description: Cari di path atau IP, atau ID data yang sama persis
+          schema: { type: string }
+        - name: user_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: action
+          in: query
+          schema: { type: string, enum: [create, update, delete] }
+        - name: resource
+          in: query
+          schema: { type: string, example: users }
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+      responses:
+        '200':
+          description: Daftar log
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/AuditLog' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /settings:
+    get:
+      operationId: listSettings
+      tags: [Settings]
+      summary: Daftar pengaturan sistem
+      description: |
+        **Hanya platform web.** Akses baca: Super-Admin, Manager Keamanan, Kepala Keamanan, Admin Keamanan.
+        Berisi nilai saat ini, nilai default, tipe, dan batas setiap setting.
+      responses:
+        '200':
+          description: Semua setting
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: updateSettings
+      tags: [Settings]
+      summary: Ubah pengaturan sistem
+      description: |
+        **Hanya platform web.** Akses: Super-Admin. Ubah satu atau beberapa setting sekaligus; perubahan langsung
+        berlaku tanpa restart dan tercatat di audit log. Nilai `null` mengembalikan setting ke default.
+        Jika satu nilai tidak valid, tidak ada yang disimpan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [values]
+              properties:
+                values:
+                  type: object
+                  additionalProperties: true
+                  example: { patrol_location_radius_meters: 150, face_mobile_accuracy: 0.8, face_match_min_score: null }
+      responses:
+        '200':
+          description: Semua setting setelah diubah
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: 'Contoh: `patrol_location_radius_meters must be between 1 and 10000`, `max_speed: unknown setting`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+components:
+  securitySchemes:
+    AppId:
+      type: apiKey
+      in: header
+      name: X-App-Id
+      description: App ID aplikasi, contoh `sp_web_k3m9qx2ht5vbn4rw_w8xq2a`.
+    AppKey:
+      type: apiKey
+      in: header
+      name: X-App-Key
+      description: |
+        Khusus halaman dokumentasi. App Key dipakai browser untuk membuat `X-Signature`
+        lalu dihapus dari request, sehingga tidak pernah terkirim ke server.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token dari `/auth/login`. Terisi otomatis setelah login di halaman ini.
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    Search:
+      name: search
+      in: query
+      schema: { type: string }
+    ShiftId:
+      name: shift_id
+      in: query
+      schema: { type: integer, format: int64 }
+    DateFrom:
+      name: date_from
+      in: query
+      description: Tanggal shift mulai (YYYY-MM-DD), inklusif
+      schema: { type: string, format: date, example: '2026-09-01' }
+    DateTo:
+      name: date_to
+      in: query
+      description: Tanggal shift akhir (YYYY-MM-DD), inklusif
+      schema: { type: string, format: date, example: '2026-09-30' }
+
+  responses:
+    FacePhotoRejected:
+      description: |
+        Validasi gagal. Selain error field biasa, pesan untuk foto wajah:
+        `no face detected in the photo, use a clear and well lit photo of the face`,
+        `the photo must contain exactly one face, N faces were found`,
+        `the face is too small, take the photo closer so the face fills more of the picture`,
+        `the face must look straight at the camera with both eyes visible`,
+        `face photo could not be read as an image`, `file must be a JPEG or PNG image`, `file size must not exceed 5 MB`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    PayloadTooLarge:
+      description: |
+        Body request lebih dari 20 MB. Server menolak sebelum membaca body lalu menutup koneksi,
+        sehingga beberapa HTTP client melaporkan error koneksi (broken pipe) alih-alih response ini.
+        Validasi ukuran foto (maksimal 5 MB) sebaiknya juga dilakukan di aplikasi sebelum upload.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Success:
+      description: Berhasil
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+    BadRequest:
+      description: Aksi tidak diizinkan untuk data ini
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: App signature atau token tidak valid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Role tidak memiliki akses
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Data tidak ditemukan
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Data sudah dipakai (misalnya email atau kode role)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ValidationError:
+      description: Input tidak valid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Image:
+      description: File gambar
+      content:
+        image/jpeg:
+          schema: { type: string, format: binary }
+        image/png:
+          schema: { type: string, format: binary }
+
+  schemas:
+    Meta:
+      type: object
+      properties:
+        message: { type: string, example: Login success }
+        code: { type: integer, example: 200 }
+        status: { type: string, example: success }
+    Envelope:
+      type: object
+      properties:
+        meta: { $ref: '#/components/schemas/Meta' }
+        data: {}
+    ErrorResponse:
+      type: object
+      properties:
+        meta:
+          allOf:
+            - $ref: '#/components/schemas/Meta'
+          example: { message: Validation error, code: 422, status: Error }
+        data:
+          description: Detail error (string, daftar pesan validasi, atau null)
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: string }
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer, example: 1 }
+        limit: { type: integer, example: 10 }
+        total: { type: integer, example: 42 }
+        total_pages: { type: integer, example: 5 }
+
+    Role:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 5 }
+        code: { type: string, example: security_team }
+        name: { type: string, example: Tim Keamanan }
+        description: { type: string, example: Petugas patroli keamanan di lapangan }
+        is_system: { type: boolean, example: true }
+        is_active: { type: boolean, example: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RoleResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/Role' }
+    CreateRoleRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          description: Huruf kecil, angka, atau underscore; diawali huruf; 3-50 karakter. Tidak bisa diubah.
+          example: supervisor_shift
+        name: { type: string, maxLength: 100, example: Supervisor Shift }
+        description: { type: string, maxLength: 255 }
+        is_active: { type: boolean, default: true }
+    UpdateRoleRequest:
+      type: object
+      required: [name, is_active]
+      properties:
+        name: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 255 }
+        is_active: { type: boolean }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 6 }
+        name: { type: string, example: Budi Santoso }
+        email: { type: string, format: email, example: budi@securepatrol.local }
+        role:
+          type: object
+          properties:
+            id: { type: integer, format: int64, example: 5 }
+            code: { type: string, example: security_team }
+            name: { type: string, example: Tim Keamanan }
+        is_active: { type: boolean, example: true }
+        is_locked: { type: boolean, example: false, description: Terkunci karena terlalu banyak salah password }
+        face_photo_url: { type: string, nullable: true, example: /api/v1/users/6/face-photo }
+        face_photo_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Berubah setiap foto wajah diganti. Aplikasi mobile mengunduh ulang foto jika nilainya berbeda dari cache.
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/User' }
+    CreateUserRequest:
+      type: object
+      required: [name, email, password, password_confirmation, role_id, face_photo]
+      properties:
+        name: { type: string, maxLength: 150 }
+        email: { type: string, format: email, description: Harus unik }
+        password:
+          type: string
+          format: password
+          description: 8-72 karakter, minimal satu huruf dan satu angka
+        password_confirmation: { type: string, format: password }
+        role_id: { type: integer, format: int64 }
+        face_photo: { type: string, format: binary, description: 'Wajib. JPEG/PNG, maksimal 5 MB (5.242.880 byte)' }
+        is_active: { type: boolean, default: true }
+    UpdateUserRequest:
+      type: object
+      required: [name, email, role_id, is_active]
+      properties:
+        name: { type: string, maxLength: 150 }
+        email: { type: string, format: email }
+        role_id: { type: integer, format: int64 }
+        is_active: { type: boolean }
+        face_photo: { type: string, format: binary, description: 'Opsional. JPEG/PNG, maksimal 5 MB' }
+    ResetPasswordRequest:
+      type: object
+      required: [password, password_confirmation]
+      properties:
+        password: { type: string, format: password }
+        password_confirmation: { type: string, format: password }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: superadmin@securepatrol.local }
+        password: { type: string, format: password }
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+    ChangePasswordRequest:
+      type: object
+      required: [old_password, password, password_confirmation]
+      properties:
+        old_password: { type: string, format: password }
+        password: { type: string, format: password }
+        password_confirmation: { type: string, format: password }
+    Token:
+      type: object
+      properties:
+        token_type: { type: string, example: Bearer }
+        access_token: { type: string }
+        expires_in: { type: integer, description: Detik sampai access token kedaluwarsa, example: 3600 }
+        expires_at: { type: string, format: date-time }
+        refresh_token: { type: string, description: Hanya bisa dipakai sekali }
+        refresh_expires_at: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/LoginUser' }
+        config: { $ref: '#/components/schemas/AppConfig' }
+        settings: { $ref: '#/components/schemas/AppSettings' }
+    AppConfig:
+      type: object
+      description: Pengaturan untuk aplikasi mobile (validasi sebelum scan dan mode offline).
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          description: 'Waktu server. Pakai untuk mengoreksi jam HP: request ditolak jika jam HP selisih lebih dari request_timestamp_tolerance_seconds.'
+        timezone: { type: string, example: Asia/Jakarta }
+        request_timestamp_tolerance_seconds: { type: integer, example: 300 }
+        location_radius_meters: { type: number, example: 100, description: Radius maksimal untuk titik yang mewajibkan validasi lokasi }
+        face_match_min_score: { type: number, nullable: true, example: 0.8, description: 'null = server hanya mengecek face_verified' }
+        max_offline_hours: { type: integer, example: 24 }
+        max_scan_photos: { type: integer, example: 3 }
+        max_photo_size_bytes: { type: integer, example: 5242880 }
+    LoginUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            face_photo_base64:
+              type: string
+              format: byte
+              nullable: true
+              description: Foto wajah (base64 standar). Hanya diisi saat login; null jika user belum punya foto.
+            face_photo_mime_type:
+              type: string
+              nullable: true
+              enum: [image/jpeg, image/png]
+              example: image/jpeg
+    TokenResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/Token' }
+
+    AppClient:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, example: Secure Patrol Android }
+        platform: { type: string, enum: [android, ios, web, server] }
+        app_id: { type: string, example: sp_and_k3m9qx2ht5vbn4rw_w8xq2a }
+        key_hint: { type: string, example: '****s0yM' }
+        description: { type: string }
+        is_active: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        key_rotated_at: { type: string, format: date-time, nullable: true }
+        previous_key_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Batas waktu key lama masih diterima setelah rotasi
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AppClientResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/AppClient' }
+    AppClientCredentialResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/AppClient'
+                - type: object
+                  properties:
+                    app_key: { type: string, example: spk_-e2NwI_EJysxpO6hWXyKRxB4CWHpSDxm18PngULs0yM }
+                    warning: { type: string }
+    CreateAppClientRequest:
+      type: object
+      required: [name, platform]
+      properties:
+        name: { type: string, maxLength: 100 }
+        platform: { type: string, enum: [android, ios, web, server] }
+        description: { type: string, maxLength: 255 }
+        expires_at: { type: string, format: date-time, nullable: true }
+    UpdateAppClientRequest:
+      type: object
+      required: [name, is_active]
+      properties:
+        name: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 255 }
+        is_active: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+    RotateKeyRequest:
+      type: object
+      properties:
+        grace_period_hours: { type: integer, minimum: 0, maximum: 168, default: 0 }
+
+    PatrolPoint:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        name: { type: string, example: Main Gate }
+        location: { type: string, example: Building A - Front Entrance }
+        nfc_code: { type: string, example: '04:A2:1F:9C' }
+        latitude: { type: number, format: double, example: -6.2250138 }
+        longitude: { type: number, format: double, example: 106.8008324 }
+        is_location_match_required:
+          type: boolean
+          description: Petugas harus berada di koordinat titik ini saat check-in
+        is_face_validation_required:
+          type: boolean
+          description: Petugas harus lolos validasi wajah saat check-in
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PatrolPointResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/PatrolPoint' }
+    CreatePatrolPointRequest:
+      type: object
+      required: [name, location, nfc_code, latitude, longitude]
+      properties:
+        name: { type: string, maxLength: 150, example: Main Gate }
+        location: { type: string, maxLength: 255, example: Building A - Front Entrance }
+        nfc_code: { type: string, maxLength: 100, example: '04:A2:1F:9C' }
+        latitude: { type: number, format: double, minimum: -90, maximum: 90, example: -6.2250138 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180, example: 106.8008324 }
+        is_location_match_required: { type: boolean, default: false }
+        is_face_validation_required: { type: boolean, default: false }
+    UpdatePatrolPointRequest:
+      type: object
+      required: [name, location, nfc_code, latitude, longitude, is_location_match_required, is_face_validation_required]
+      properties:
+        name: { type: string, maxLength: 150 }
+        location: { type: string, maxLength: 255 }
+        nfc_code: { type: string, maxLength: 100 }
+        latitude: { type: number, format: double, minimum: -90, maximum: 90 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180 }
+        is_location_match_required: { type: boolean }
+        is_face_validation_required: { type: boolean }
+
+    PatrolShift:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        name: { type: string, example: Shift 1 }
+        start_time: { type: string, example: '08:00' }
+        end_time: { type: string, example: '16:00', description: 'Batas akhir (cut-off). 24:00 diperbolehkan.' }
+        duration_minutes: { type: integer, example: 480 }
+        crosses_midnight: { type: boolean, example: false }
+        is_active: { type: boolean, example: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PatrolShiftResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/PatrolShift' }
+    CreatePatrolShiftRequest:
+      type: object
+      required: [name, start_time, end_time]
+      properties:
+        name: { type: string, maxLength: 100, example: Shift 1 }
+        start_time: { type: string, pattern: '^\d{2}:\d{2}$', example: '08:00' }
+        end_time: { type: string, pattern: '^\d{2}:\d{2}$', example: '16:00', description: 'Lebih kecil dari start_time berarti melewati tengah malam, misalnya 22:00-06:00.' }
+        is_active: { type: boolean, default: true }
+    UpdatePatrolShiftRequest:
+      type: object
+      required: [name, start_time, end_time, is_active]
+      properties:
+        name: { type: string, maxLength: 100 }
+        start_time: { type: string, pattern: '^\d{2}:\d{2}$' }
+        end_time: { type: string, pattern: '^\d{2}:\d{2}$' }
+        is_active: { type: boolean }
+
+    PatrolGroupSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        shift_id: { type: integer, format: int64 }
+        shift_name: { type: string, example: Shift 1 }
+        shift_date: { type: string, format: date, example: '2026-09-29' }
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+    PatrolGroup:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        shift:
+          type: object
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string, example: Shift 1 }
+        shift_date: { type: string, format: date, example: '2026-09-29', description: Tanggal shift dimulai }
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        status: { type: string, enum: [upcoming, ongoing, finished] }
+        progress:
+          type: object
+          properties:
+            total_points: { type: integer, example: 15 }
+            scanned_points: { type: integer, example: 12 }
+            unscanned_points: { type: integer, example: 3 }
+            total_scans: { type: integer, example: 20 }
+            abnormal_scans: { type: integer, example: 1 }
+        created_at: { type: string, format: date-time }
+    PatrolGroupDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PatrolGroup'
+                - type: object
+                  properties:
+                    items:
+                      type: array
+                      items: { $ref: '#/components/schemas/PatrolListItem' }
+    PatrolUserSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string, example: Budi Santoso }
+        email: { type: string, format: email }
+    PatrolListItem:
+      type: object
+      description: Salinan titik patroli di dalam satu group.
+      properties:
+        id: { type: integer, format: int64 }
+        group: { $ref: '#/components/schemas/PatrolGroupSummary' }
+        patrol_point_id: { type: integer, format: int64 }
+        name: { type: string, example: Main Gate }
+        location: { type: string, example: Building A - Front Entrance }
+        nfc_code: { type: string, example: '04:A2:1F:9C' }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        is_location_match_required: { type: boolean }
+        is_face_validation_required: { type: boolean }
+        is_scanned: { type: boolean }
+        scan_count: { type: integer, example: 2 }
+        last_scanned_at: { type: string, format: date-time, nullable: true }
+        last_scanned_by:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/PatrolUserSummary'
+          nullable: true
+        last_condition: { type: string, enum: [normal, abnormal], nullable: true }
+
+    PatrolScanRequest:
+      type: object
+      required: [client_scan_id, nfc_code, condition, latitude, longitude]
+      properties:
+        client_scan_id: { type: string, maxLength: 64, description: 'ID unik dari HP (misalnya UUID) untuk mencegah data ganda saat sync ulang', example: 7f3c2a1e9b8d4c6fa0e1d2c3b4a59687 }
+        nfc_code: { type: string, maxLength: 100, example: '04:A2:1F:9C' }
+        condition: { type: string, enum: [normal, abnormal] }
+        note: { type: string, maxLength: 1000, description: Wajib jika condition = abnormal }
+        latitude: { type: number, format: double, minimum: -90, maximum: 90, example: -6.2250138 }
+        longitude: { type: number, format: double, minimum: -180, maximum: 180, example: 106.8008324 }
+        scanned_at: { type: string, format: date-time, description: 'Waktu scan di HP (RFC3339). Kosong = waktu server.', example: '2026-09-29T08:15:00+07:00' }
+        face_verified: { type: boolean, description: Hasil pencocokan wajah di HP }
+        face_match_score: { type: number, format: double, minimum: 0, maximum: 1, example: 0.93 }
+        photos:
+          type: array
+          maxItems: 3
+          description: 'Maksimal 3 foto JPEG/PNG, masing-masing maksimal 5 MB'
+          items: { type: string, format: binary }
+    PatrolScan:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        client_scan_id: { type: string }
+        group: { $ref: '#/components/schemas/PatrolGroupSummary' }
+        patrol_point:
+          type: object
+          properties:
+            patrol_list_item_id: { type: integer, format: int64 }
+            patrol_point_id: { type: integer, format: int64 }
+            name: { type: string, example: Main Gate }
+            location: { type: string }
+            nfc_code: { type: string }
+        condition: { type: string, enum: [normal, abnormal] }
+        note: { type: string }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        distance_meters: { type: number, format: double, example: 12.4, description: Jarak HP ke titik saat scan }
+        is_location_valid: { type: boolean, description: 'true jika jarak <= setting patrol_location_radius_meters' }
+        is_face_verified: { type: boolean }
+        face_match_score: { type: number, format: double, nullable: true }
+        scanned_at: { type: string, format: date-time, description: Waktu scan di HP }
+        received_at: { type: string, format: date-time, description: Waktu diterima server }
+        scanned_by: { $ref: '#/components/schemas/PatrolUserSummary' }
+        photos:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              url: { type: string, example: /api/v1/patrol-scans/10/photos/21 }
+    PatrolScanResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/PatrolScan' }
+
+    HelpDeskArticle:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        category: { type: string, enum: [rule, guide, faq], description: 'rule = aturan, guide = tata cara, faq = tanya jawab' }
+        title: { type: string, example: Cara Melakukan Patroli (Scan NFC) }
+        content: { type: string, description: Isi artikel dalam format Markdown }
+        sort_order: { type: integer, example: 1 }
+        is_published: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    HelpDeskArticleResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/HelpDeskArticle' }
+    CreateHelpDeskArticleRequest:
+      type: object
+      required: [category, title, content]
+      properties:
+        category: { type: string, enum: [rule, guide, faq] }
+        title: { type: string, maxLength: 200 }
+        content: { type: string, maxLength: 20000, description: Markdown }
+        sort_order: { type: integer, minimum: 0, description: 'Opsional. Kosong = ditempatkan paling akhir di kategorinya.' }
+        is_published: { type: boolean, default: true, description: false = simpan sebagai draft }
+    UpdateHelpDeskArticleRequest:
+      type: object
+      required: [category, title, content, is_published]
+      properties:
+        category: { type: string, enum: [rule, guide, faq] }
+        title: { type: string, maxLength: 200 }
+        content: { type: string, maxLength: 20000 }
+        sort_order: { type: integer, minimum: 0, description: 'Opsional. Kosong = urutan tetap, atau paling akhir jika pindah kategori.' }
+        is_published: { type: boolean }
+    ReorderHelpDeskArticlesRequest:
+      type: object
+      required: [category, article_ids]
+      properties:
+        category: { type: string, enum: [rule, guide, faq] }
+        article_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Semua ID artikel kategori tersebut, dalam urutan baru
+          items: { type: integer, format: int64 }
+          example: [7, 4, 6, 5]
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        action: { type: string, enum: [create, update, delete] }
+        resource: { type: string, example: patrol-points }
+        resource_id: { type: string, nullable: true, example: '12' }
+        endpoint: { type: string, example: 'PUT /patrol-points/:id' }
+        method: { type: string, example: PUT }
+        path: { type: string, example: /api/v1/patrol-points/12 }
+        status_code: { type: integer, example: 200 }
+        user:
+          type: object
+          nullable: true
+          description: null untuk aksi dari CLI
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string, example: Super Admin }
+            email: { type: string, example: superadmin@securepatrol.local }
+            role_code: { type: string, example: super_admin }
+        app_platform: { type: string, example: web }
+        ip_address: { type: string, example: 203.0.113.7 }
+        user_agent: { type: string }
+        source: { type: string, enum: [api, cli] }
+        created_at: { type: string, format: date-time }
+    AppSettings:
+      type: object
+      description: Setting yang dikirim ke aplikasi pada login, refresh, dan GET /auth/me. Diatur di /settings.
+      properties:
+        patrol_location_radius_meters: { type: number, example: 100, description: Jarak maksimal HP ke titik patroli saat scan (meter) }
+        patrol_max_offline_hours: { type: integer, example: 24, description: Batas umur scan offline yang masih diterima (jam) }
+        face_mobile_accuracy: { type: number, example: 0.75, description: Skor kecocokan wajah (0-1) yang dibutuhkan HP untuk menyatakan wajah cocok }
+        login_max_failed_attempts: { type: integer, example: 3, description: Jumlah salah password sebelum akun dikunci }
+        login_lock_minutes: { type: integer, example: 5, description: Lama akun dikunci (menit) }
+        access_token_ttl_minutes: { type: integer, example: 60, description: Masa berlaku access token (menit) }
+        refresh_token_ttl_days: { type: integer, example: 30, description: Berapa lama tetap login tanpa memasukkan password (hari) }
+    ProfileResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/User'
+                - type: object
+                  properties:
+                    settings: { $ref: '#/components/schemas/AppSettings' }
+    Setting:
+      type: object
+      properties:
+        key: { type: string, example: patrol_location_radius_meters }
+        group: { type: string, enum: [patrol, face, security] }
+        type: { type: string, enum: [integer, number, boolean] }
+        value: { description: Nilai saat ini (number atau boolean), example: 100 }
+        default_value: { description: Nilai default, example: 100 }
+        is_default: { type: boolean }
+        min: { type: number, nullable: true, example: 1 }
+        max: { type: number, nullable: true, example: 10000 }
+        unit: { type: string, example: meters }
+        description: { type: string }
+        updated_by: { type: integer, format: int64, nullable: true }
+        updated_at: { type: string, format: date-time, nullable: true }
+    SettingsResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Setting' }
