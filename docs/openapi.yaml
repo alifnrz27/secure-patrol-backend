@@ -25,8 +25,9 @@ info:
     Detail lengkap dan contoh kode mobile ada di `docs/AUTH.md`.
 
     ## Pembatasan platform
-    **Login per platform:** App Client `android` dan `ios` bisa dipakai semua role. App Client `web` (dan `server`)
-    hanya untuk Super-Admin, Manager Keamanan, Kepala Keamanan, dan Admin Keamanan; role lain mendapat `403`
+    **Login per platform:** App Client `android` dan `ios` hanya untuk role unit (Kepala Keamanan, Admin Keamanan,
+    Tim Keamanan, dan role kustom); Super-Admin dan Manager Keamanan (pusat) ditolak. App Client `web` (dan `server`)
+    hanya untuk Super-Admin, Manager Keamanan, Kepala Keamanan, dan Admin Keamanan. Role yang ditolak mendapat `403`
     `your role is not allowed to sign in on this platform` saat login, refresh, maupun request berikutnya.
 
     User management, role management, dan app client management **hanya bisa diakses dari App Client
@@ -84,6 +85,8 @@ tags:
     description: Riwayat create, update, dan delete (siapa, kapan, dari IP mana)
   - name: Settings
     description: Pengaturan sistem yang bisa diubah tanpa restart (disimpan di database)
+  - name: Branding
+    description: Nama dan logo aplikasi (diubah Super-Admin)
 security:
   - AppId: []
     AppKey: []
@@ -1079,7 +1082,7 @@ paths:
       description: |
         **Hanya platform android/ios.** Satu NFC boleh di-scan berkali-kali dalam shift yang sama.
         Hanya user unit yang bisa scan, dan hanya titik milik unitnya (`403 this patrol point belongs to another unit`;
-        user pusat `403 only unit users can scan patrol points`). Radius dan setting lain memakai setting unit.
+        user pusat tidak bisa login di mobile). Radius dan setting lain memakai setting unit.
 
         - Shift ditentukan dari `scanned_at` (waktu scan di HP), sehingga scan offline yang dikirim belakangan
           tetap masuk ke shift yang benar. Maksimal setting `patrol_max_offline_hours` (default 24 jam) ke belakang.
@@ -1482,6 +1485,56 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422':
           description: 'Contoh: `patrol_location_radius_meters must be between 1 and 10000`, `max_speed: unknown setting`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /branding:
+    get:
+      operationId: getBranding
+      tags: [Branding]
+      summary: Nama dan logo aplikasi
+      description: |
+        **Tanpa login** (cukup request bertanda tangan App Client), semua platform, supaya halaman login bisa
+        menampilkan nama dan logo. `logo_base64` = `null` berarti aplikasi memakai logo bawaannya.
+        Simpan di cache; unduh ulang logo hanya jika `logo_updated_at` berubah.
+      security:
+        - AppId: []
+          AppKey: []
+      responses:
+        '200':
+          description: Branding saat ini
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: updateBranding
+      tags: [Branding]
+      summary: Ubah nama dan logo aplikasi
+      description: |
+        **Hanya platform web.** Akses: Super-Admin. Berlaku untuk semua unit dan tercatat di audit log.
+        Logo JPEG/PNG maksimal 1 MB (disarankan persegi, PNG transparan). Tanpa file `logo`, logo lama tetap
+        dipakai; `remove_logo=true` menghapus logo sehingga aplikasi kembali memakai logo bawaan.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/UpdateBrandingRequest' }
+            encoding:
+              logo:
+                contentType: image/jpeg, image/png
+      responses:
+        '200':
+          description: Branding setelah diubah
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrandingResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422':
+          description: '`logo size must not exceed 1 MB`, `file must be a JPEG or PNG image`, atau `app_name` kosong / lebih dari 100 karakter'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -2252,6 +2305,27 @@ components:
         description: { type: string }
         updated_by: { type: integer, format: int64, nullable: true }
         updated_at: { type: string, format: date-time, nullable: true }
+    Branding:
+      type: object
+      properties:
+        app_name: { type: string, example: Secure Patrol }
+        logo_base64: { type: string, nullable: true, description: 'Logo dalam base64 standar; null = pakai logo bawaan aplikasi' }
+        logo_mime_type: { type: string, nullable: true, example: image/png }
+        logo_updated_at: { type: string, format: date-time, nullable: true, description: Berubah setiap logo diganti atau dihapus }
+        updated_at: { type: string, format: date-time }
+    BrandingResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/Branding' }
+    UpdateBrandingRequest:
+      type: object
+      required: [app_name]
+      properties:
+        app_name: { type: string, maxLength: 100, example: Secure Patrol }
+        logo: { type: string, format: binary, description: 'Opsional. JPEG/PNG, maksimal 1 MB' }
+        remove_logo: { type: boolean, default: false, description: 'true = hapus logo, aplikasi memakai logo bawaan' }
     SettingsResponse:
       allOf:
         - $ref: '#/components/schemas/Envelope'

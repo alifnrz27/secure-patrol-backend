@@ -23,6 +23,7 @@ func Migrate(db *gorm.DB) error {
 		&models.HelpDeskArticle{},
 		&models.AuditLog{},
 		&models.SystemSetting{},
+		&models.Branding{},
 	}
 
 	for _, model := range migrationModels {
@@ -35,6 +36,9 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	if err := ensureSettingIndexes(db); err != nil {
+		return err
+	}
+	if err := ensureBranding(db); err != nil {
 		return err
 	}
 	return assignLegacyDataToUnit(db)
@@ -167,4 +171,10 @@ func migrateModel(db *gorm.DB, model any) error {
 	)
 
 	return nil
+}
+
+// ensureBranding creates the branding row with the default application name.
+func ensureBranding(db *gorm.DB) error {
+	branding := models.Branding{ID: models.BrandingID, AppName: models.DefaultAppName}
+	return db.Where(models.Branding{ID: models.BrandingID}).FirstOrCreate(&branding).Error
 }

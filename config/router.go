@@ -82,6 +82,7 @@ func Route(db *gorm.DB) {
 
 	// Public group api's (app signature only)
 	routes.PublicRouter(api, db)
+	routes.BrandingPublicRouter(api, db)
 
 	// Authenticated group api's (app signature + user access token)
 	api.Use(middleware.BearerAuth(authService))
@@ -111,6 +112,7 @@ func Route(db *gorm.DB) {
 	routes.HelpDeskRouter(api, db)
 	routes.AuditLogRouter(api, db)
 	routes.SettingRouter(api, db)
+	routes.BrandingRouter(api, db)
 
 	app.Mount("/api/v1", api)
 

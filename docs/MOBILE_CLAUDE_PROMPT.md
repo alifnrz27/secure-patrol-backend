@@ -38,7 +38,7 @@ user, role, app client, patrol point, shift, dan artikel help desk.
 **Unit.** Setiap petugas (Tim, Kepala, Admin Keamanan) terikat ke **satu unit**. Server otomatis membatasi semua
 data (group, titik patroli, shift, riwayat scan, setting) ke unit user tersebut; aplikasi tidak perlu mengirim
 `unit_id`. Petugas hanya bisa scan titik milik unitnya. User pusat (Super-Admin, Manager Keamanan) tidak punya
-unit dan **tidak bisa scan**; aplikasi mobile ditujukan untuk user unit.
+unit dan **tidak bisa login di aplikasi mobile** (server menolak dengan 403).
 
 ## 2. Konfigurasi build
 
@@ -140,6 +140,18 @@ melaporkan error koneksi. Cegah dengan memvalidasi ukuran foto sebelum mengirim.
 
 ## 4. Autentikasi
 
+### 4.0 Nama & logo aplikasi — `GET /api/v1/branding`
+
+- Endpoint ini **tidak butuh login** (cukup signature App Client). Panggil saat aplikasi dibuka (splash/login),
+  sebelum dan sesudah login.
+- Response: `app_name`, `logo_base64`, `logo_mime_type`, `logo_updated_at`, `updated_at`. `logo_base64 = null` →
+  pakai logo bawaan aplikasi.
+- Tampilkan `app_name` dan logo di splash, layar login, dan header Dashboard. Nama aplikasi di launcher/ikon
+  tidak ikut berubah (itu dari build).
+- Simpan nama dan logo (file) di penyimpanan lokal supaya tampil saat offline. Decode dan simpan ulang logo hanya
+  jika `logo_updated_at` berbeda dari yang tersimpan. Jika request gagal, pakai cache; jika belum ada cache, pakai
+  nama "Secure Patrol" dan logo bawaan.
+
 ### 4.1 Login — `POST /api/v1/auth/login`
 
 Request: `{"email": "budi@securepatrol.local", "password": "Rahasia123"}`. Trim spasi pada email.
@@ -206,8 +218,10 @@ Error login: 401 `email or password is incorrect`, 403 `account is inactive`,
 403 `your unit is inactive, contact the head office` ("Unit Anda sedang dinonaktifkan, hubungi pusat"), 429 `account is temporarily locked...`,
 422 validasi. Login **tidak** bisa dilakukan offline.
 
-Semua role boleh login dari App Client `android` dan `ios`. Jika muncul 403 `your role is not allowed to sign in on this platform`,
-aplikasi memakai App ID/Key platform yang salah (misalnya milik web) — periksa konfigurasi build.
+Hanya role unit (Tim, Kepala, Admin Keamanan, role kustom) yang boleh login dari App Client `android` dan `ios`.
+Jika login menjawab 403 `your role is not allowed to sign in on this platform`, akun tersebut akun pusat
+(Super-Admin/Manager Keamanan): tampilkan "Akun pusat hanya dapat digunakan melalui web admin." Jika pesan ini
+muncul untuk **semua** akun, aplikasi memakai App ID/Key platform yang salah — periksa konfigurasi build.
 
 ### 4.2 Membuka aplikasi dengan sesi tersimpan
 
@@ -501,7 +515,7 @@ Pesan 422 yang mungkin muncul (tampilkan versi Bahasa Indonesia):
 | `meta.message` | Tampilkan |
 |---|---|
 | `this patrol point belongs to another unit` | Titik patroli ini milik unit lain |
-| `only unit users can scan patrol points` | Akun pusat tidak bisa melakukan patroli |
+| `only unit users can scan patrol points` | Akun pusat tidak bisa melakukan patroli (praktis tidak terjadi karena akun pusat tidak bisa login di mobile) |
 
 Riwayat scan milik sendiri bisa ditampilkan dari `GET /api/v1/patrol-scans?page=1&limit=20` (Tim Keamanan
 otomatis hanya melihat scan miliknya) — opsional, jika waktu memungkinkan.
@@ -578,7 +592,7 @@ Dengan `SEED_DUMMY_DATA=true`, backend membuat user berikut (password dari `SEED
 
 - `tim@securepatrol.local` — Tim Keamanan (akun utama untuk uji mobile)
 - `kepala@securepatrol.local`, `admin@securepatrol.local` — unit yang sama (**Unit Utama**, kode `UNIT-UTAMA`)
-- `manager@securepatrol.local`, `superadmin@securepatrol.local` — user pusat, tidak punya unit dan tidak bisa scan
+- `manager@securepatrol.local`, `superadmin@securepatrol.local` — user pusat, **tidak bisa login di mobile** (untuk menguji penolakan)
 
 Titik patroli contoh memakai kode `DUMMY-NFC-0001` s.d. `0003`, yang tidak ada pada tag fisik. Untuk uji
 dengan tag NFC sungguhan, minta admin mendaftarkan titik baru lewat web dengan `nfc_code` berisi UID tag dalam

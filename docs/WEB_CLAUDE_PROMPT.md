@@ -37,6 +37,7 @@ dari web dengan 403).
 | App Client | Buat App ID/Key, rotasi key, aktif/nonaktif, masa berlaku |
 | Help Desk | CRUD artikel (Markdown dengan preview), draft/terbit, urutkan dengan drag & drop |
 | Audit Log | Riwayat create/update/delete: waktu, pengguna, aksi, data, IP (Super-Admin & Manager Keamanan) |
+| Tampilan Aplikasi | Nama dan logo aplikasi (Super-Admin) |
 | Pengaturan Sistem | Radius scan, batas offline, akurasi wajah, lockout login, masa berlaku token, validasi foto wajah |
 | Profil | Data diri, foto, ganti password, logout semua perangkat |
 
@@ -498,6 +499,20 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
   Semua atau tidak sama sekali: 422 berisi daftar pesan per setting.
 - Manager Keamanan melihat halaman dalam mode baca.
 - Setelah menyimpan `access_token_ttl_minutes` atau `refresh_token_ttl_days`, nilai baru berlaku untuk login berikutnya.
+
+### 10.9 Tampilan Aplikasi (nama & logo) — `/api/v1/branding`
+
+- `GET /api/v1/branding` **tidak butuh login** (cukup signature App Client): `app_name`, `logo_base64`,
+  `logo_mime_type`, `logo_updated_at`, `updated_at`. `logo_base64 = null` → pakai logo bawaan web.
+- Ambil saat aplikasi dibuka (sebelum halaman login) dan pakai di: halaman login, sidebar/header, `document.title`
+  (mis. "Dashboard — {app_name}"), dan favicon (buat dari logo). Simpan di `localStorage` (dibungkus try/catch)
+  agar tampil instan saat reload; perbarui di belakang layar.
+- Halaman **Pengaturan → Tampilan Aplikasi** (menu hanya untuk Super-Admin): form multipart `PUT /api/v1/branding`
+  dengan `app_name` (wajib, maks 100), `logo` (opsional, JPEG/PNG **maks 1 MB**, cek sebelum upload, tampilkan
+  pratinjau; sarankan persegi dan PNG transparan), dan tombol **Pakai logo bawaan** (`remove_logo=true`).
+  Tanpa file `logo`, logo lama tetap dipakai.
+- Setelah berhasil, langsung perbarui nama/logo di seluruh aplikasi (state global dan cache).
+- Error 422: `logo size must not exceed 1 MB`, `file must be a JPEG or PNG image`; 403 untuk selain Super-Admin.
 
 ## 11. Profil
 

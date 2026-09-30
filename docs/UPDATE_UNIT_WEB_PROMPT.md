@@ -187,6 +187,20 @@ Setiap item sekarang punya field tambahan: `level` (`global`/`unit`), `global_va
 - [ ] Export oleh Kepala Keamanan hanya berisi unitnya; export pusat dengan filter unit bekerja; kolom Unit ada.
 - [ ] Setting unit: ubah radius unit → badge "Mengikuti pusat" hilang; "Ikuti nilai pusat" mengembalikannya.
 
+## 12a. Tambahan: Nama & logo aplikasi (Super-Admin)
+
+Backend sekarang punya pengaturan nama dan logo aplikasi. Terapkan sesuai bagian **10.9** di
+`WEB_CLAUDE_PROMPT.md` (salin ringkasannya di sini):
+
+- `GET /api/v1/branding` (tanpa login): `app_name`, `logo_base64`, `logo_mime_type`, `logo_updated_at`.
+  `logo_base64 = null` → logo bawaan. Pakai di halaman login, sidebar/header, `document.title`, dan favicon;
+  cache di `localStorage` (try/catch).
+- Menu **Pengaturan → Tampilan Aplikasi** hanya untuk Super-Admin: `PUT /api/v1/branding` multipart dengan
+  `app_name` (wajib, maks 100), `logo` (opsional, JPEG/PNG maks 1 MB, pratinjau), `remove_logo=true` untuk kembali
+  ke logo bawaan. Setelah berhasil, perbarui nama/logo di seluruh aplikasi.
+- Kriteria selesai: Super-Admin mengganti nama dan logo → halaman login (setelah logout) dan sidebar menampilkan
+  yang baru; "Pakai logo bawaan" mengembalikan logo default; Kepala/Admin/Manager tidak melihat menu ini.
+
 ## 13. Laporan akhir
 
 Laporkan file yang diubah, cara menguji, hasil setiap kriteria di bagian 12, keputusan yang kamu ambil sendiri,

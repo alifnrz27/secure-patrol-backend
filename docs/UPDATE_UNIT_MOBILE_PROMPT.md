@@ -12,7 +12,9 @@ Sumber kebenaran kontrak API: `/docs/openapi.yaml` di backend (environment devel
 - Setiap petugas (Tim, Kepala, Admin Keamanan) terikat ke **satu unit** (lokasi/cabang). Titik patroli, shift,
   group patroli, riwayat scan, dan setting semuanya milik unit.
 - Petugas **hanya bisa scan titik milik unitnya**. Kode NFC tetap unik di semua unit.
-- User pusat (Super-Admin, Manager Keamanan) tidak punya unit dan **tidak bisa scan**.
+- User pusat (Super-Admin, Manager Keamanan) tidak punya unit dan **tidak bisa login di aplikasi mobile**
+  (sebelumnya semua role boleh). Server menolak login, refresh, dan request mereka dari App Client android/ios
+  dengan 403 `your role is not allowed to sign in on this platform`.
 - Pusat bisa **menonaktifkan unit**; seluruh user unit itu langsung tidak bisa memakai aplikasi.
 
 ## 2. Data unit dari login
@@ -34,8 +36,10 @@ Sumber kebenaran kontrak API: `/docs/openapi.yaml` di backend (environment devel
 - `settings` dan `config` di respons **sudah sesuai unit** (setiap unit bisa punya radius scan, batas offline,
   akurasi wajah, lockout, dan masa token sendiri). Tidak perlu logika tambahan — tetap pakai nilai terbaru dari
   login/refresh/`/auth/me`/`/app-config`, dan **jangan hardcode** nilai default.
-- Jika `user.unit` bernilai `null` (akun pusat login di mobile): tampilkan pesan "Akun pusat tidak dapat melakukan
-  patroli" di Dashboard dan nonaktifkan tombol Scan. Fitur lain (help desk, ganti password, logout) tetap bisa.
+- Akun pusat tidak bisa login di mobile. Di layar login, 403 `your role is not allowed to sign in on this platform`
+  → tampilkan **"Akun pusat hanya dapat digunakan melalui web admin."** Jika pesan yang sama muncul pada refresh
+  atau request lain (role user diubah menjadi role pusat), akhiri sesi dan kembali ke login dengan pesan tersebut.
+  Antrian scan tidak dihapus.
 
 ## 3. Unit nonaktif — error baru (penting)
 
@@ -62,7 +66,7 @@ antrian sebagai gagal dengan pesan ini, dan tampilkan di daftar scan pending/gag
 | `meta.message` | Tampilkan |
 |---|---|
 | `this patrol point belongs to another unit` | Titik patroli ini milik unit lain. |
-| `only unit users can scan patrol points` | Akun pusat tidak dapat melakukan patroli. |
+| `only unit users can scan patrol points` | Akun pusat tidak dapat melakukan patroli. (Praktis tidak terjadi karena akun pusat tidak bisa login di mobile.) |
 
 Ini berbeda dengan 403 unit nonaktif (bagian 3) yang **tidak** permanen.
 
@@ -98,8 +102,21 @@ Pastikan parser JSON **mengabaikan field yang tidak dikenal**, sehingga field ba
 - [ ] Login saat unit nonaktif → pesan unit nonaktif (bukan salah password).
 - [ ] Scan tag milik unit lain → "Tag NFC ini tidak terdaftar di unit Anda." (online) atau, jika terlanjur
       tersimpan, gagal permanen dengan pesan "Titik patroli ini milik unit lain."
-- [ ] Login dengan akun pusat di mobile → tombol Scan nonaktif dengan pesan akun pusat.
+- [ ] Login `superadmin@` / `manager@securepatrol.local` di mobile → ditolak dengan "Akun pusat hanya dapat digunakan
+      melalui web admin."
 - [ ] Respons dengan field baru tidak menyebabkan error parsing.
+
+## 7a. Tambahan: Nama & logo aplikasi
+
+Backend sekarang punya pengaturan nama dan logo aplikasi (diubah Super-Admin dari web). Terapkan sesuai bagian
+**4.0** di `MOBILE_CLAUDE_PROMPT.md`:
+
+- `GET /api/v1/branding` **tanpa login** (cukup signature): `app_name`, `logo_base64`, `logo_mime_type`,
+  `logo_updated_at`. `logo_base64 = null` → logo bawaan aplikasi.
+- Tampilkan di splash, layar login, dan header Dashboard. Cache nama dan file logo untuk offline; decode ulang
+  logo hanya jika `logo_updated_at` berubah. Tanpa cache dan tanpa jaringan → "Secure Patrol" + logo bawaan.
+- Kriteria selesai: nama/logo diganti dari web → setelah aplikasi dibuka ulang, splash dan login menampilkan yang
+  baru; mode pesawat → tetap menampilkan nama/logo dari cache.
 
 ## 8. Laporan akhir
 
@@ -109,6 +126,6 @@ Laporkan file yang diubah, migrasi penyimpanan lokal (jika ada), cara menguji, h
 ## Lampiran: data uji (development)
 
 Dengan `SEED_DUMMY_DATA=true`: `tim@`, `kepala@`, `admin@securepatrol.local` ada di **Unit Utama**
-(`UNIT-UTAMA`); `manager@` dan `superadmin@securepatrol.local` adalah akun pusat. Untuk menguji tag unit lain,
+(`UNIT-UTAMA`); `manager@` dan `superadmin@securepatrol.local` adalah akun pusat (tidak bisa login di mobile). Untuk menguji tag unit lain,
 buat unit kedua dan titik patrolinya dari web (Super-Admin membuat unit dan Kepala Keamanan-nya, lalu Kepala
 tersebut membuat titik).

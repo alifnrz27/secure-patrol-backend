@@ -15,7 +15,8 @@ const (
 )
 
 // WebRoles are the roles allowed to sign in from the web and server platforms.
-// Android and iOS apps accept every role.
+// The Android and iOS apps accept every role except the head office roles
+// (see CentralRoles), which do not patrol.
 var WebRoles = []string{
 	RoleSuperAdmin,
 	RoleSecurityManager,
@@ -28,7 +29,7 @@ var WebRoles = []string{
 func RoleCanUsePlatform(roleCode string, platform string) bool {
 	switch platform {
 	case PlatformAndroid, PlatformIOS:
-		return true
+		return !IsCentralRole(roleCode)
 	case PlatformWeb, PlatformServer:
 		for _, role := range WebRoles {
 			if role == roleCode {

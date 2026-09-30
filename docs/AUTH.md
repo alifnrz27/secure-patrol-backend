@@ -174,7 +174,7 @@ Keamanan, dan role kustom adalah user **unit**: wajib punya satu unit dan hanya 
 
 | Fitur | Platform | Super-Admin | Manager Keamanan | Kepala / Admin Keamanan | Tim Keamanan |
 |---|---|---|---|---|---|
-| Login dari **android/ios** | android/ios | ✓ | ✓ | ✓ | ✓ |
+| Login dari **android/ios** | android/ios | **dilarang** | **dilarang** | ✓ | ✓ |
 | Login dari **web** (dan server) | web | ✓ | ✓ | ✓ | **dilarang** |
 | Profil sendiri, ganti password | semua | ✓ | ✓ | ✓ | ✓ (android/ios) |
 | Lihat unit | semua | semua | semua | unit sendiri | unit sendiri |
@@ -196,10 +196,13 @@ Keamanan, dan role kustom adalah user **unit**: wajib punya satu unit dan hanya 
 | Lihat user | **web** | semua | semua | unit sendiri | |
 | Tambah/ubah/hapus user | **web** | semua (termasuk user pusat) | | user unit sendiri (role unit) | |
 | Kelola App ID / App Key | **web** | ✓ | | | |
+| Lihat nama & logo aplikasi (`GET /branding`) | semua, **tanpa login** | ✓ | ✓ | ✓ | ✓ |
+| Ubah nama & logo aplikasi | **web** | ✓ | | | |
 
 Kepala Keamanan dan Admin Keamanan saat ini punya hak akses yang sama, tetapi tetap role yang berbeda.
 
-- Role yang tidak boleh memakai web (Tim Keamanan dan role kustom) ditolak dengan HTTP 403
+- Role yang tidak boleh memakai platform tersebut (Tim Keamanan dan role kustom di web; Super-Admin dan Manager
+  Keamanan di android/ios) ditolak dengan HTTP 403
   `your role is not allowed to sign in on this platform` saat login, refresh token, dan setiap request, sehingga
   token lama pun tidak bisa dipakai jika role user berubah.
 - Platform ditentukan oleh App Client yang menandatangani request (`X-App-Id`), bukan oleh user. Fitur bertanda
