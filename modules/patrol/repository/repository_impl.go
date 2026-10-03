@@ -276,7 +276,7 @@ func (r *repository) scanFilterQuery(filter dto.ScanFilter) *gorm.DB {
 }
 
 // FindScansForExport returns up to limit matching scans, oldest first.
-func (r *repository) FindScansForExport(filter dto.ScanFilter, limit int) (scans []models.PatrolScan, err error) {
+func (r *repository) FindScansForExport(filter dto.ScanFilter, limit int, withPhotos bool) (scans []models.PatrolScan, err error) {
 	var ids []int64
 	err = r.scanFilterQuery(filter).
 		Order("patrol_scans.scanned_at ASC, patrol_scans.id ASC").
@@ -286,11 +286,14 @@ func (r *repository) FindScansForExport(filter dto.ScanFilter, limit int) (scans
 		return []models.PatrolScan{}, err
 	}
 
-	// Photos are not part of the export.
-	err = r.db.Model(&models.PatrolScan{}).
+	query := r.db.Model(&models.PatrolScan{}).
 		Preload("ScannedByUser", unscoped).
 		Preload("PatrolGroup", withUnit).
-		Preload("PatrolListItem").
+		Preload("PatrolListItem")
+	if withPhotos {
+		query = query.Preload("Photos", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") })
+	}
+	err = query.
 		Where("patrol_scans.id IN ?", ids).
 		Order("patrol_scans.scanned_at ASC, patrol_scans.id ASC").
 		Find(&scans).Error
@@ -364,4 +367,56 @@ func (r *repository) CreateScan(scan *models.PatrolScan) error {
 				"updated_at":      time.Now(),
 			}).Error
 	})
+}
+
+func (r *repository) FindShift(id int64) (shift models.PatrolShift, err error) {
+	err = r.db.Unscoped().First(&shift, id).Error
+	return shift, err
+}
+
+func (r *repository) FindUnit(id int64) (unit models.Unit, err error) {
+	err = r.db.Unscoped().First(&unit, id).Error
+	return unit, err
+}
+
+func (r *repository) PointSummary(unitID int64, filter dto.PointSummaryFilter) (rows []dto.PointSummaryRow, groups int64, err error) {
+	// A fresh query each time: a gorm query must not be reused after it ran.
+	groupQuery := func() *gorm.DB {
+		query := r.db.Model(&models.PatrolGroup{}).Where("patrol_groups.unit_id = ?", unitID)
+		if filter.GroupID > 0 {
+			return query.Where("patrol_groups.id = ?", filter.GroupID)
+		}
+		return applyGroupFilter(query, "patrol_groups", 0, filter.ShiftID, filter.DateFrom, filter.DateTo)
+	}
+	if err = groupQuery().Count(&groups).Error; err != nil || groups == 0 {
+		return []dto.PointSummaryRow{}, groups, err
+	}
+
+	// Every point of the groups' patrol lists is listed, also when it was never scanned.
+	err = r.db.Table("patrol_list_items AS i").
+		Select(`i.patrol_point_id,
+			MAX(i.name) AS name, MAX(i.location) AS location, MAX(i.nfc_code) AS nfc_code,
+			COUNT(DISTINCT i.patrol_group_id) AS groups,
+			COUNT(DISTINCT s.patrol_group_id) AS scanned_groups,
+			COUNT(s.id) AS total_scans,
+			COUNT(s.id) FILTER (WHERE s.condition = ?) AS normal_scans,
+			COUNT(s.id) FILTER (WHERE s.condition = ?) AS abnormal_scans,
+			COUNT(DISTINCT s.scanned_by) AS officers,
+			MIN(s.scanned_at) AS first_scanned_at,
+			MAX(s.scanned_at) AS last_scanned_at`, models.PatrolConditionNormal, models.PatrolConditionAbnormal).
+		Joins("LEFT JOIN patrol_scans AS s ON s.patrol_list_item_id = i.id AND s.deleted_at IS NULL").
+		Where("i.deleted_at IS NULL AND i.patrol_group_id IN (?)", groupQuery().Select("patrol_groups.id")).
+		Group("i.patrol_point_id").
+		Order("name ASC").
+		Scan(&rows).Error
+	return rows, groups, err
+}
+
+func (r *repository) FindPhotoPathsSince(t time.Time) (paths []string, err error) {
+	err = r.db.Model(&models.PatrolScanPhoto{}).
+		Joins("JOIN patrol_scans s ON s.id = patrol_scan_photos.patrol_scan_id").
+		Where("s.received_at >= ?", t).
+		Order("s.received_at DESC").
+		Pluck("patrol_scan_photos.path", &paths).Error
+	return paths, err
 }

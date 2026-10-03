@@ -38,6 +38,7 @@ dari web dengan 403).
 | Help Desk | CRUD artikel (Markdown dengan preview), draft/terbit, urutkan dengan drag & drop |
 | Audit Log | Riwayat create/update/delete: waktu, pengguna, aksi, data, IP (Super-Admin & Manager Keamanan) |
 | Tampilan Aplikasi | Nama dan logo aplikasi (Super-Admin) |
+| License | Status license, Install ID, pemakaian unit/App Client, pasang license (Super-Admin) |
 | Pengaturan Sistem | Radius scan, batas offline, akurasi wajah, lockout login, masa berlaku token, validasi foto wajah |
 | Profil | Data diri, foto, ganti password, logout semua perangkat |
 
@@ -161,6 +162,8 @@ perbarui offset dari header `Date` response tersebut lalu ulangi **sekali**.
 | 401 `meta.message = "Unauthorized"`, `data = "Token is expired"` | Refresh (5.2) lalu ulangi request |
 | 401 `"Unauthorized"` dengan `data` lain | Coba refresh sekali; gagal → sesi berakhir, arahkan ke login |
 | 403 `your unit is inactive, contact the head office` | Unit user dinonaktifkan: akhiri sesi, kembali ke login dengan pesan "Unit Anda sedang dinonaktifkan, hubungi pusat" |
+| 403 `license is not active, contact your administrator` | License tidak aktif: lihat 10.10 (akhiri sesi / arahkan Super-Admin ke halaman License) |
+| 403 `this app client exceeds the license limit` | Tampilkan halaman "Aplikasi ini melebihi batas license" (10.10) |
 | 403 lainnya | Tampilkan halaman/notifikasi "Anda tidak memiliki akses" |
 | 404 | "Data tidak ditemukan" |
 | 409 | Konflik data (email/kode NFC/kode role/kode unit sudah dipakai, shift tumpang tindih, unit masih berisi data) — tampilkan pada field terkait |
@@ -343,12 +346,33 @@ otomatis hanya mendapat petugas unitnya). Semua endpoint di bagian ini menerima 
 
 **Ekspor Excel** — tombol "Export Excel" membuka dialog filter: **Shift**, **Titik**, **Petugas**, **Tanggal shift
 dari** dan **sampai** (isian awal mengikuti filter halaman). Unduh lewat
-`GET /api/v1/patrol-scans/export?shift_id=&patrol_point_id=&scanned_by=&date_from=&date_to=` menggunakan `apiFetch`
+`GET /api/v1/patrol-scans/export?shift_id=&patrol_point_id=&scanned_by=&date_from=&date_to=&include_photos=` menggunakan `apiFetch`
 (butuh signature dan token, jadi tidak bisa memakai link biasa): ambil sebagai blob, lalu simpan dengan nama dari
 header `Content-Disposition`. User pusat juga bisa memilih **Unit** (`unit_id`). File `.xlsx` berisi sheet
 "Riwayat Scan" (kolom Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Unit, Shift, Titik, Lokasi, Kondisi, Catatan, Petugas, Email petugas) dan sheet "Filter". Tampilkan
-loading selama unduhan. Error 422: `date_from must not be after date_to` atau
-`export is limited to 50000 rows, narrow the filter (for example the date range)`.
+loading selama unduhan.
+
+- **Tanggal shift dari/sampai wajib.** Rentang maksimal diambil dari `GET /api/v1/settings` (semua role web bisa
+  membacanya): `export_max_range_days` (default 7) dan `export_photo_max_range_days` (default 1). Batasi pemilih
+  tanggal sesuai nilai itu dan tampilkan keterangan "Maksimal N hari".
+- Checkbox **"Sertakan foto"** (`include_photos=true`): menambah kolom Foto 1–3 berisi thumbnail. Saat dicentang,
+  rentang otomatis dibatasi ke `export_photo_max_range_days` (default **1 hari**: tanggal dari = sampai), dengan
+  keterangan "File lebih besar dan proses lebih lama". Tampilkan loading tanpa batas waktu singkat (bisa ±30 detik).
+- Error 422: `date_from and date_to are required for an export`, `date_from must not be after date_to`,
+  `an export can cover at most N days, ...`, `an export with photos can cover only 1 day, ...`,
+  `export is limited to 50000 rows, ...`, `an export with photos is limited to 2000 rows, ...`. Tampilkan
+  pesan dalam Bahasa Indonesia di dialog.
+
+**Total patroli per titik** — `GET /api/v1/patrol-point-summary?group_id=` (satu shift pada satu tanggal) atau
+`?shift_id=&date_from=&date_to=` (satu shift di rentang tanggal; unit mengikuti shift). Response: `unit`, `shift`,
+`groups`, `totals` (`points`, `scanned_points`, `unscanned_points`, `total_scans`, `abnormal_scans`), dan `items`
+per titik (`name`, `location`, `nfc_code`, `total_scans`, `normal_scans`, `abnormal_scans`, `officers`,
+`scanned_groups`/`groups`, `first_scanned_at`, `last_scanned_at`), termasuk titik yang belum pernah di-scan.
+Pakai di:
+- detail group di Monitoring (tab **Rekap per titik**, `group_id`);
+- halaman **Laporan** (pilih shift + rentang tanggal → tabel dan grafik batang total scan per titik, sorot titik
+  dengan `total_scans = 0` atau `scanned_groups < groups`), dengan ekspor CSV.
+Error 422 `group_id or shift_id is required`; shift/group unit lain 404.
 
 **Laporan** — untuk rentang tanggal (maks. 31 hari), ambil `GET /api/v1/patrol-groups?date_from=&date_to=&limit=100`
 (semua halaman). Tampilkan tabel per tanggal × shift: `scanned_points/total_points` (%), `total_scans`,
@@ -513,6 +537,48 @@ loading selama unduhan. Error 422: `date_from must not be after date_to` atau
   Tanpa file `logo`, logo lama tetap dipakai.
 - Setelah berhasil, langsung perbarui nama/logo di seluruh aplikasi (state global dan cache).
 - Error 422: `logo size must not exceed 1 MB`, `file must be a JPEG or PNG image`; 403 untuk selain Super-Admin.
+
+### 10.10 License — `/api/v1/license` (Super-Admin)
+
+Backend wajib memiliki license aktif. Status license ada di field `license` pada response login, refresh, dan
+`GET /auth/me`: `status` (`missing`/`active`/`grace`/`expired`/`invalid`), `expires_at`, `grace_until`, `days_left`.
+
+- **Saat aplikasi dibuka (sebelum login):** panggil `GET /api/v1/license/status` (tanpa token, cukup signature):
+  `status`, `locked`, `message`, `expires_at`, `grace_until`, `days_left`.
+  - `locked = false` → alur normal (halaman login), dengan banner jika `grace` / `days_left` ≤ 30.
+  - `locked = true` → tampilkan **layar "License belum aktif"** (status: belum dipasang / berakhir / tidak valid)
+    dengan tombol **"Login sebagai Super-Admin"**. Login role lain akan ditolak server (403), jadi tampilkan pesan
+    jelas. Setelah Super-Admin login, langsung arahkan ke halaman License (hanya halaman itu yang bisa dipakai).
+  - Panggil ulang endpoint ini setelah license dipasang, saat tab kembali aktif, dan setiap 5 menit selama sesi;
+    jika berubah menjadi `locked`, arahkan ke layar terkunci.
+- **Banner global** (semua role web):
+  - `active` dengan `days_left` terisi (≤ 30 hari): kuning — "License berakhir dalam {days_left} hari."
+  - `grace`: merah — "License sudah berakhir. Sistem akan terkunci dalam {days_left} hari. Hubungi vendor."
+- **Terkunci** (`missing`/`expired`/`invalid`):
+  - Login selain Super-Admin → 403 `license is not active, contact your administrator` → tampilkan
+    "Sistem belum memiliki license aktif. Hubungi administrator."
+  - Request lain yang dijawab 403 dengan pesan itu (termasuk saat sedang bekerja) → akhiri sesi (non Super-Admin)
+    dengan pesan yang sama. Untuk Super-Admin, arahkan ke halaman License.
+  - Super-Admin setelah login saat terkunci: hanya tampilkan halaman **License** (layout minimal, tanpa menu lain).
+- **Halaman Pengaturan → License** (menu hanya Super-Admin): `GET /api/v1/license` →
+  - status (badge), `reason` jika tidak aktif, **Install ID** (tombol salin; "kirim ke vendor untuk mendapatkan license"),
+  - data license: `license_id`, `customer`, `issued_at`, `expires_at`, `grace_until`,
+  - pemakaian: "Unit aktif {used}/{max}", "App Client aktif {used}/{max}" (progress bar; merah jika `over_limit`,
+    dengan pesan "Melebihi license: unit/App Client terbaru tidak berfungsi"),
+  - form **Pasang license**: textarea kode (`SPL1....`) → `PUT /api/v1/license` `{"code": "..."}`. Setelah berhasil,
+    muat ulang sesi (`GET /auth/me`) agar banner dan status terbaru.
+  - Error 422: `license code is malformed` / `license code signature is invalid` → "Kode license tidak valid";
+    `this license was issued for another installation` → "License ini untuk instalasi lain (Install ID berbeda)";
+    `this license has already expired` → "License ini sudah berakhir".
+- **Batas di halaman lain**:
+  - Unit (tambah/aktifkan): 403 `the license unit limit has been reached (N)` → "Batas unit license tercapai (N)".
+  - App Client (tambah/aktifkan): 403 `the license app client limit has been reached (N)`.
+  - Tampilkan sisa kuota di halaman Unit dan App Client ("3 dari 5 unit aktif") dari `GET /api/v1/license`
+    (Super-Admin).
+  - Login user unit: 403 `your unit exceeds the license limit, contact the head office` → tampilkan pesan itu
+    ("Unit Anda melebihi batas license, hubungi pusat").
+  - App Client web yang melebihi batas: semua request 403 `this app client exceeds the license limit` → tampilkan
+    halaman "Aplikasi ini melebihi batas license. Hubungi administrator." (bukan masalah login).
 
 ## 11. Profil
 

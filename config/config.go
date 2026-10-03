@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"strconv"
 
 	"secure-patrol-backend/migration"
@@ -75,6 +76,13 @@ func Connect() *gorm.DB {
 		log.Printf("[settings] created %d setting(s) with their default value", created)
 	}
 	settingservice.Init(settings)
+
+	// The license is verified at startup and then every minute by a worker.
+	licenses := licenseservice.NewLicenseService(db)
+	licenseservice.Init(licenses)
+	if status := licenses.Status(); status.Locked() {
+		log.Printf("[license] %s: %s (install id %s)", status.State, status.Reason, status.InstallID)
+	}
 
 	if os.Getenv("SEED_DUMMY_DATA") == "true" {
 		if err := seeder.Seed(db); err != nil {

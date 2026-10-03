@@ -11,6 +11,7 @@ import (
 	"secure-patrol-backend/modules/appclient/service"
 	auditlogrepository "secure-patrol-backend/modules/auditlog/repository"
 	auditlogservice "secure-patrol-backend/modules/auditlog/service"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/pkg/nonce"
 	"secure-patrol-backend/seeder"
 	"strconv"
@@ -34,8 +35,12 @@ func Run(db *gorm.DB, args []string) bool {
 		createAppClient(db, args[1:])
 	case "create-super-admin":
 		createSuperAdmin(db, args[1:])
+	case "license-info":
+		licenseInfo()
+	case "license-install":
+		licenseInstall(db, args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\navailable commands: create-app-client, create-super-admin\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown command %q\navailable commands: create-app-client, create-super-admin, license-info, license-install\n", args[0])
 		os.Exit(1)
 	}
 
@@ -164,4 +169,54 @@ func recordCLIAudit(db *gorm.DB, resource string, id int64) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: audit log not written: %v\n", err)
 	}
+}
+
+// licenseInfo prints the install id (sent to the vendor to get a license) and
+// the current license status.
+func licenseInfo() {
+	licenses := licenseservice.Instance()
+	status := licenses.Refresh()
+	usage, err := licenses.Usage()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "license info failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("  Install ID  : %s\n", status.InstallID)
+	fmt.Printf("  Status      : %s\n", status.State)
+	if status.Reason != "" {
+		fmt.Printf("  Reason      : %s\n", status.Reason)
+	}
+	if p := status.Payload; p != nil {
+		fmt.Printf("  License ID  : %s\n", p.LicenseID)
+		fmt.Printf("  Customer    : %s\n", p.Customer)
+		fmt.Printf("  Expires at  : %s (grace until %s)\n", p.ExpiresAt.Format(time.RFC3339), p.GraceUntil().Format(time.RFC3339))
+	}
+	fmt.Printf("  Units       : %d / %d\n", usage.Units, usage.MaxUnits)
+	fmt.Printf("  App clients : %d / %d\n", usage.AppClients, usage.MaxAppClients)
+}
+
+// licenseInstall installs a license code, e.g. on a new installation before
+// any app client exists: license-install -code SPL1....
+func licenseInstall(db *gorm.DB, args []string) {
+	flags := flag.NewFlagSet("license-install", flag.ExitOnError)
+	code := flags.String("code", "", "license code from the vendor (required)")
+	flags.Parse(args)
+	if *code == "" {
+		flags.Usage()
+		os.Exit(1)
+	}
+
+	status, err := licenseservice.Instance().Install(*code, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "license install failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	var installed models.License
+	if err := db.Order("id DESC").First(&installed).Error; err == nil {
+		recordCLIAudit(db, "license", installed.ID)
+	}
+	fmt.Printf("License %s installed, status: %s\n", status.Payload.LicenseID, status.State)
+	licenseInfo()
 }

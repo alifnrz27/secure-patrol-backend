@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/models"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/modules/unit/dto"
 	"secure-patrol-backend/modules/unit/repository"
 	"secure-patrol-backend/modules/unit/service"
@@ -138,6 +139,8 @@ func (h *UnitHandler) errorResponse(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrUnitNotFound):
 		code, message = http.StatusNotFound, err.Error()
+	case errors.Is(err, licenseservice.ErrUnitLimitReached), errors.Is(err, licenseservice.ErrLicenseInactive):
+		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrUnitCodeTaken), errors.Is(err, service.ErrUnitInUse):
 		code, message = http.StatusConflict, err.Error()
 	default:

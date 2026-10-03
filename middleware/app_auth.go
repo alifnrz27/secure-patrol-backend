@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/modules/appclient/service"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/pkg/log"
 
 	"github.com/gofiber/fiber/v2"
@@ -40,6 +41,21 @@ func AppAuth(appClientService service.AppClientService) fiber.Handler {
 
 			response := helper.APIResponse("Unauthorized app", http.StatusUnauthorized, "Error", err.Error())
 			return c.Status(http.StatusUnauthorized).JSON(response)
+		}
+
+		// App clients above the license limit (the newest ones) do not work,
+		// also when they were added or re-activated directly in the database.
+		if licenses := licenseservice.Instance(); licenses != nil {
+			allowed, err := licenses.AppClientAllowed(client.ID)
+			if err != nil {
+				log.Errorf("app auth: license check: %v", err)
+				response := helper.APIResponse("Internal server error", http.StatusInternalServerError, "Error", nil)
+				return c.Status(http.StatusInternalServerError).JSON(response)
+			}
+			if !allowed {
+				response := helper.APIResponse("Forbidden", http.StatusForbidden, "Error", licenseservice.ErrAppClientOverLimit.Error())
+				return c.Status(http.StatusForbidden).JSON(response)
+			}
 		}
 
 		c.Locals(helper.LocalAppClientID, client.ID)

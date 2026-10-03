@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"secure-patrol-backend/pkg/imageutil"
 	"testing"
 )
 
@@ -180,18 +181,18 @@ func TestValidateUsesExifOrientation(t *testing.T) {
 
 func TestJpegOrientation(t *testing.T) {
 	base := encodeJPEG(t, background(8, 8))
-	if got := jpegOrientation(base); got != 1 {
+	if got := imageutil.JPEGOrientation(base); got != 1 {
 		t.Errorf("no EXIF: got %d, want 1", got)
 	}
 	for _, o := range []int{1, 3, 6, 8} {
-		if got := jpegOrientation(withOrientation(base, o, false)); got != o {
+		if got := imageutil.JPEGOrientation(withOrientation(base, o, false)); got != o {
 			t.Errorf("little endian orientation %d: got %d", o, got)
 		}
-		if got := jpegOrientation(withOrientation(base, o, true)); got != o {
+		if got := imageutil.JPEGOrientation(withOrientation(base, o, true)); got != o {
 			t.Errorf("big endian orientation %d: got %d", o, got)
 		}
 	}
-	if got := jpegOrientation([]byte{0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF}); got != 1 {
+	if got := imageutil.JPEGOrientation([]byte{0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF}); got != 1 {
 		t.Errorf("truncated segment: got %d, want 1", got)
 	}
 }

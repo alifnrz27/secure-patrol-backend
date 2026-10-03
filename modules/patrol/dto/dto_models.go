@@ -118,3 +118,48 @@ type ScanRequest struct {
 	FaceVerified   *bool    `form:"face_verified"`
 	FaceMatchScore *float64 `form:"face_match_score" validate:"omitempty,gte=0,lte=1"`
 }
+
+// PointSummaryFilter selects the patrol groups to summarize: one group (one
+// shift on one date) or a shift over a range of shift dates.
+type PointSummaryFilter struct {
+	GroupID  int64
+	ShiftID  int64
+	DateFrom string
+	DateTo   string
+}
+
+// PointSummaryRow is the patrol total of one patrol point.
+type PointSummaryRow struct {
+	PatrolPointID  int64      `json:"patrol_point_id"`
+	Name           string     `json:"name"`
+	Location       string     `json:"location"`
+	NFCCode        string     `json:"nfc_code"`
+	Groups         int64      `json:"groups"`
+	ScannedGroups  int64      `json:"scanned_groups"`
+	TotalScans     int64      `json:"total_scans"`
+	NormalScans    int64      `json:"normal_scans"`
+	AbnormalScans  int64      `json:"abnormal_scans"`
+	Officers       int64      `json:"officers"`
+	FirstScannedAt *time.Time `json:"first_scanned_at"`
+	LastScannedAt  *time.Time `json:"last_scanned_at"`
+}
+
+type PointSummaryTotals struct {
+	Points          int64 `json:"points"`
+	ScannedPoints   int64 `json:"scanned_points"`
+	UnscannedPoints int64 `json:"unscanned_points"`
+	TotalScans      int64 `json:"total_scans"`
+	AbnormalScans   int64 `json:"abnormal_scans"`
+}
+
+// PointSummaryDTO is the patrol total per patrol point of one shift in one unit.
+type PointSummaryDTO struct {
+	Unit     UnitSummaryDTO     `json:"unit"`
+	Shift    ShiftSummaryDTO    `json:"shift"`
+	GroupID  *int64             `json:"group_id"`
+	DateFrom string             `json:"date_from"`
+	DateTo   string             `json:"date_to"`
+	Groups   int64              `json:"groups"`
+	Totals   PointSummaryTotals `json:"totals"`
+	Items    []PointSummaryRow  `json:"items"`
+}

@@ -118,6 +118,32 @@ Backend sekarang punya pengaturan nama dan logo aplikasi (diubah Super-Admin dar
 - Kriteria selesai: nama/logo diganti dari web → setelah aplikasi dibuka ulang, splash dan login menampilkan yang
   baru; mode pesawat → tetap menampilkan nama/logo dari cache.
 
+## 7b. Tambahan: License
+
+Backend sekarang wajib memiliki license (dipasang pusat).
+
+**Cek saat aplikasi dibuka:** `GET /api/v1/license/status` (tanpa token) → jika `locked = true`, tampilkan
+"Sistem belum memiliki license aktif. Hubungi administrator." menggantikan layar login. Simpan hasil terakhir untuk
+offline; jangan blokir aplikasi saat offline hanya karena tidak bisa mengecek.
+
+Tangani juga error berikut di klien API (juga di layar
+login), seperti unit nonaktif di bagian 3 — sesi berakhir, **antrian scan tidak dihapus** dan dikirim lagi
+setelah login ulang:
+
+| 403 dengan pesan | Tampilkan |
+|---|---|
+| `license is not active, contact your administrator` | Sistem belum memiliki license aktif. Hubungi administrator. |
+| `your unit exceeds the license limit, contact the head office` | Unit Anda melebihi batas license, hubungi pusat. |
+
+`this app client exceeds the license limit` (403, semua request): tampilkan "Aplikasi ini melebihi batas license.
+Hubungi administrator."; **jangan** logout dan jangan hapus antrian, coba lagi nanti.
+
+Field baru `license` di response login/refresh/`/auth/me` (`status`, `expires_at`, `grace_until`, `days_left`):
+jika `status = grace`, tampilkan banner "License sistem sudah berakhir, hubungi administrator." di Dashboard.
+
+Kriteria selesai: saat license dicabut/berakhir, aplikasi keluar ke login dengan pesan license dan scan pending
+tetap ada; setelah license dipasang lagi dan login ulang, scan pending terkirim.
+
 ## 8. Laporan akhir
 
 Laporkan file yang diubah, migrasi penyimpanan lokal (jika ada), cara menguji, hasil setiap kriteria di bagian

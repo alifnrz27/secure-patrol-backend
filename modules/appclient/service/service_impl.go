@@ -6,6 +6,7 @@ import (
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/models"
 	"secure-patrol-backend/modules/appclient/repository"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/pkg/log"
 	"secure-patrol-backend/pkg/nonce"
 	"strconv"
@@ -50,6 +51,9 @@ func (s *service) CreateAppClient(client models.AppClient) (models.AppClient, st
 	if _, ok := helper.AppPlatformCodes[client.Platform]; !ok {
 		return client, "", ErrPlatformInvalid
 	}
+	if err := checkLicense(); err != nil {
+		return client, "", err
+	}
 
 	appID, err := helper.GenerateAppID(client.Platform)
 	if err != nil {
@@ -81,6 +85,11 @@ func (s *service) UpdateAppClient(id int64, input models.AppClient, currentAppCl
 
 	if client.ID == currentAppClientID && !input.IsActive {
 		return client, ErrCannotModifyActive
+	}
+	if input.IsActive && !client.IsActive {
+		if err := checkLicense(); err != nil {
+			return client, err
+		}
 	}
 
 	client.Name = strings.TrimSpace(input.Name)
@@ -231,4 +240,12 @@ func newAppKey() (plain string, encrypted string, err error) {
 
 	encrypted, err = helper.EncryptAppKey(plain)
 	return plain, encrypted, err
+}
+
+// checkLicense refuses a new active app client when the license limit is reached.
+func checkLicense() error {
+	if licenses := licenseservice.Instance(); licenses != nil {
+		return licenses.CanActivateAppClient()
+	}
+	return nil
 }

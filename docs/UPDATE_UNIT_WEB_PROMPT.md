@@ -124,6 +124,13 @@ Perubahan dari versi sebelumnya yang perlu diperhatikan:
   Kolom file sekarang: Waktu scan, Diterima server, Dikirim offline, Tanggal shift, **Unit**, Shift, Titik,
   Lokasi, Kondisi, Catatan, Petugas, Email petugas. Sheet "Filter" juga berisi baris Unit.
 - Laporan: kelompokkan per unit saat "Semua unit".
+- **Export Excel (baru):** tanggal dari/sampai **wajib**, maksimal `export_max_range_days` hari (default 7; dari
+  `GET /api/v1/settings`). Checkbox **"Sertakan foto"** (`include_photos=true`) menambah thumbnail foto di kolom
+  Foto 1–3, dengan rentang maksimal `export_photo_max_range_days` (default **1 hari**). Detail dan pesan error di
+  `WEB_CLAUDE_PROMPT.md` bagian 9.
+- **Total patroli per titik (baru):** `GET /api/v1/patrol-point-summary?group_id=` atau
+  `?shift_id=&date_from=&date_to=` — rekap per titik untuk satu shift di satu unit (termasuk titik yang belum
+  di-scan). Tampilkan sebagai tab "Rekap per titik" di detail group dan di halaman Laporan (lihat bagian 9 prompt utama).
 
 ## 8. Titik Patroli & Pengaturan Shift
 
@@ -200,6 +207,26 @@ Backend sekarang punya pengaturan nama dan logo aplikasi. Terapkan sesuai bagian
   ke logo bawaan. Setelah berhasil, perbarui nama/logo di seluruh aplikasi.
 - Kriteria selesai: Super-Admin mengganti nama dan logo → halaman login (setelah logout) dan sidebar menampilkan
   yang baru; "Pakai logo bawaan" mengembalikan logo default; Kepala/Admin/Manager tidak melihat menu ini.
+
+## 12b. Tambahan: License
+
+Backend sekarang wajib memiliki license. Terapkan bagian **10.10** di `WEB_CLAUDE_PROMPT.md` (ringkasan):
+
+- **Cek saat aplikasi dibuka (tanpa login):** `GET /api/v1/license/status` → `status`, `locked`, `message`,
+  `expires_at`, `grace_until`, `days_left`. Jika `locked`, tampilkan layar "License belum aktif" dengan tombol login
+  Super-Admin; setelah login, arahkan ke halaman License (bagian 10.10 prompt utama).
+- Field baru `license` di response login/refresh/`/auth/me`: `status`, `expires_at`, `grace_until`, `days_left` →
+  banner kuning (≤ 30 hari lagi) atau merah (`grace`).
+- Terkunci (`missing`/`expired`/`invalid`): selain Super-Admin ditolak 403 `license is not active, contact your
+  administrator` saat login dan setiap request → akhiri sesi dengan pesan. Super-Admin hanya bisa membuka halaman License.
+- Menu baru **Pengaturan → License** (Super-Admin): `GET /api/v1/license` (status, Install ID + salin, data license,
+  pemakaian unit/App Client, over limit) dan form pasang `PUT /api/v1/license` `{"code"}` dengan pesan error 422.
+- 403 baru: `the license unit limit has been reached (N)` (Unit), `the license app client limit has been reached (N)`
+  (App Client), `your unit exceeds the license limit, contact the head office` (login user unit),
+  `this app client exceeds the license limit` (semua request).
+- Kriteria selesai: sebelum license dipasang, hanya Super-Admin yang bisa login dan melihat halaman License;
+  memasang kode valid membuka semua menu; kode rusak menampilkan "Kode license tidak valid"; membuat unit di atas
+  batas menampilkan pesan batas; banner muncul saat `days_left` ≤ 30 atau status `grace`.
 
 ## 13. Laporan akhir
 

@@ -14,8 +14,13 @@ import (
 
 const MaxScanPhotos = helper.MaxScanPhotos
 
-// MaxExportRows keeps an export small enough to build in memory.
-const MaxExportRows = 50000
+// MaxExportRows keeps an export small enough to build in memory. Exports with
+// photos embed a thumbnail per photo, so they allow fewer rows. Both are a
+// safety net on top of the date range limits in the settings.
+const (
+	MaxExportRows      = 50000
+	MaxExportPhotoRows = 2000
+)
 
 var (
 	ErrGroupNotFound         = errors.New("patrol group not found")
@@ -30,12 +35,33 @@ var (
 	ErrFaceMatchScoreMissing = errors.New("face_match_score is required for this patrol point")
 	ErrFaceMatchScoreTooLow  = errors.New("face match score is below the minimum required")
 	ErrExportTooLarge        = fmt.Errorf("export is limited to %d rows, narrow the filter (for example the date range)", MaxExportRows)
+	ErrExportPhotosTooLarge  = fmt.Errorf("an export with photos is limited to %d rows, narrow the filter (for example the date range)", MaxExportPhotoRows)
+	ErrExportRangeRequired   = errors.New("date_from and date_to are required for an export")
+	ErrSummaryTargetMissing  = errors.New("group_id or shift_id is required")
+	ErrShiftNotFound         = errors.New("patrol shift not found")
 	ErrDateRangeInvalid      = errors.New("date_from must not be after date_to")
 	ErrUnitRequired          = errors.New("unit_id is required")
 	ErrUnitNotFound          = errors.New("unit not found")
 	ErrScanNeedsUnit         = errors.New("only unit users can scan patrol points")
 	ErrPointOfOtherUnit      = errors.New("this patrol point belongs to another unit")
 )
+
+// ExportRangeError is returned when the export date range is longer than the
+// settings allow.
+type ExportRangeError struct {
+	MaxDays    int
+	WithPhotos bool
+}
+
+func (e *ExportRangeError) Error() string {
+	if e.WithPhotos {
+		if e.MaxDays == 1 {
+			return "an export with photos can cover only 1 day, use the same date_from and date_to"
+		}
+		return fmt.Sprintf("an export with photos can cover at most %d days, narrow date_from and date_to", e.MaxDays)
+	}
+	return fmt.Sprintf("an export can cover at most %d days, narrow date_from and date_to", e.MaxDays)
+}
 
 // LocationOutOfRangeError is returned when the officer is too far from the patrol point.
 type LocationOutOfRangeError struct {
@@ -86,6 +112,8 @@ type PatrolService interface {
 	// from the unit's shift settings when it does not exist yet.
 	EnsureGroupAt(unitID int64, t time.Time) (models.PatrolGroup, error)
 	RunScheduler(ctx context.Context)
+	// BackfillThumbnails creates missing export thumbnails of recent scan photos.
+	BackfillThumbnails(ctx context.Context)
 
 	GetGroups(actor Actor, filter dto.GroupFilter) ([]models.PatrolGroup, int64, error)
 	GetGroup(actor Actor, id int64) (models.PatrolGroup, []models.PatrolListItem, error)
@@ -100,7 +128,11 @@ type PatrolService interface {
 	GetScans(actor Actor, filter dto.ScanFilter) ([]models.PatrolScan, int64, error)
 	GetScan(actor Actor, id int64) (models.PatrolScan, error)
 	GetScanPhotoPath(actor Actor, scanID int64, photoID int64) (string, error)
-	// ExportScans returns the scans for the Excel export, oldest first.
-	ExportScans(actor Actor, filter dto.ScanFilter) ([]models.PatrolScan, error)
+	// ExportScans returns the scans for the Excel export, oldest first. With
+	// withPhotos the photos are loaded too, and the stricter limits apply.
+	ExportScans(actor Actor, filter dto.ScanFilter, withPhotos bool) ([]models.PatrolScan, error)
 	FilterNames(filter dto.ScanFilter) (repository.FilterNames, error)
+	// PointSummary returns the patrol total per patrol point of one shift in one
+	// unit: of one group, or of a shift over a range of shift dates.
+	PointSummary(actor Actor, filter dto.PointSummaryFilter) (dto.PointSummaryDTO, error)
 }

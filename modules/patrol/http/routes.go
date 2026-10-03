@@ -14,6 +14,9 @@ func PatrolRoutes(app *fiber.App, handler *PatrolHandler) {
 
 	app.Get("/patrol-list-items", handler.GetItems)
 
+	// Patrol total per patrol point of one shift in one unit (web reports and dashboards).
+	app.Get("/patrol-point-summary", middleware.RequireRoles(models.WebRoles...), handler.GetPointSummary)
+
 	// Scanning NFC tags is only available from the mobile apps.
 	mobileOnly := middleware.RequirePlatforms(models.PlatformAndroid, models.PlatformIOS)
 	app.Post("/patrol-scans", mobileOnly, handler.Scan)

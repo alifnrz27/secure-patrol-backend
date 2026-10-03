@@ -7,6 +7,7 @@ import (
 	"secure-patrol-backend/models"
 	"secure-patrol-backend/modules/appclient/dto"
 	"secure-patrol-backend/modules/appclient/service"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/pkg/log"
 	"time"
 
@@ -158,6 +159,8 @@ func (h *AppClientHandler) errorResponse(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, service.ErrAppClientNotFound):
 		code, message = http.StatusNotFound, err.Error()
+	case errors.Is(err, licenseservice.ErrAppClientLimit):
+		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrPlatformInvalid), errors.Is(err, service.ErrCannotModifyActive):
 		code, message = http.StatusUnprocessableEntity, err.Error()
 	default:

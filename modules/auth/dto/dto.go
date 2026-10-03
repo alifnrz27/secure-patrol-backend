@@ -4,6 +4,7 @@ import (
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/models"
 	"secure-patrol-backend/modules/auth/service"
+	licensehttp "secure-patrol-backend/modules/license/http"
 	settingservice "secure-patrol-backend/modules/setting/service"
 	userdto "secure-patrol-backend/modules/user/dto"
 	"secure-patrol-backend/pkg/log"
@@ -38,6 +39,7 @@ func (d *dto) ToTokenDTO(pair service.TokenPair) TokenDTO {
 		User:             LoginUserDTO{UserDTO: d.userDto.ToUserDTO(pair.User)},
 		Config:           d.ToAppConfigDTO(pair.User.UnitID),
 		Settings:         settingservice.ForUnit(pair.User.UnitID).PublicMap(),
+		License:          licensehttp.Summary(),
 	}
 }
 
@@ -45,6 +47,7 @@ func (d *dto) ToProfileDTO(user models.User) ProfileDTO {
 	return ProfileDTO{
 		UserDTO:  d.userDto.ToUserDTO(user),
 		Settings: settingservice.ForUnit(user.UnitID).PublicMap(),
+		License:  licensehttp.Summary(),
 	}
 }
 

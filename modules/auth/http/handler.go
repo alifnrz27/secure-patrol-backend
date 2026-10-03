@@ -7,6 +7,7 @@ import (
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/modules/auth/dto"
 	"secure-patrol-backend/modules/auth/service"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	userdto "secure-patrol-backend/modules/user/dto"
 	"secure-patrol-backend/pkg/log"
 	"strconv"
@@ -168,7 +169,9 @@ func (h *AuthHandler) errorResponse(c *fiber.Ctx, err error) error {
 	case errors.Is(err, service.ErrInvalidCredentials), errors.Is(err, service.ErrSessionInvalid):
 		code, message = http.StatusUnauthorized, err.Error()
 	case errors.Is(err, service.ErrAccountInactive), errors.Is(err, service.ErrPlatformNotAllowed),
-		errors.Is(err, service.ErrUnitInactive):
+		errors.Is(err, service.ErrUnitInactive),
+		errors.Is(err, licenseservice.ErrLicenseInactive),
+		errors.Is(err, licenseservice.ErrUnitOverLicense):
 		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrOldPasswordInvalid),
 		errors.Is(err, service.ErrSamePassword),

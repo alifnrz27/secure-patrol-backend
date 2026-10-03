@@ -172,3 +172,19 @@ func VerifyPayloadSignature(appKey string, payload string, signature string) boo
 	expected := SignPayload(appKey, payload)
 	return hmac.Equal([]byte(expected), []byte(strings.ToLower(signature)))
 }
+
+// InstallID identifies this installation for licensing. It is derived from
+// APP_MASTER_SECRET (which never changes, because every app key depends on it),
+// so it cannot be changed from the database to match another customer's license.
+func InstallID() string {
+	sum := deriveAppKey("secure-patrol install id")
+	raw := base32NoPad.EncodeToString(sum[:10]) // 16 characters
+	return "SP-" + raw[0:4] + "-" + raw[4:8] + "-" + raw[8:12] + "-" + raw[12:16]
+}
+
+// LicenseStateMAC signs the stored license state so edits in the database are detected.
+func LicenseStateMAC(value string) string {
+	mac := hmac.New(sha256.New, deriveAppKey("secure-patrol license state"))
+	mac.Write([]byte(value))
+	return hex.EncodeToString(mac.Sum(nil))
+}

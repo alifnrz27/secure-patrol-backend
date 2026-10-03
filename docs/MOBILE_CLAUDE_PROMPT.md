@@ -128,6 +128,9 @@ tidak akurat, jadi:
 | 401, `meta.message = "Unauthorized"`, `data = "Token is expired"` | Access token habis | Refresh (bagian 4.3) lalu ulang request |
 | 401, `meta.message = "Unauthorized"`, `data` lain | Token/sesi tidak valid (logout di perangkat lain, akun dinonaktifkan, password direset) | Coba refresh sekali; jika gagal → sesi berakhir, arahkan ke login (tanpa menghapus antrian scan) |
 | 403, `data`/`meta.message` = `your unit is inactive, contact the head office` | Unit user dinonaktifkan pusat | Sesi berakhir: arahkan ke login dengan pesan "Unit Anda sedang dinonaktifkan, hubungi pusat". **Jangan hapus antrian scan**; kirim lagi setelah unit aktif dan user login ulang |
+| 403, `license is not active, contact your administrator` | License sistem tidak aktif (belum dipasang, berakhir, atau tidak valid) | Sesi berakhir: ke login dengan pesan "Sistem belum memiliki license aktif. Hubungi administrator." **Jangan hapus antrian scan**; kirim lagi setelah license aktif dan user login ulang |
+| 403, `your unit exceeds the license limit, contact the head office` | Unit user melebihi batas license | Sama seperti unit nonaktif: sesi berakhir dengan pesan "Unit Anda melebihi batas license, hubungi pusat"; antrian tetap |
+| 403, `this app client exceeds the license limit` | App ID aplikasi ini melebihi batas license | Tampilkan "Aplikasi ini melebihi batas license. Hubungi administrator."; jangan logout, jangan hapus antrian; coba lagi nanti |
 | 403 lainnya | Role atau platform tidak diizinkan | Tampilkan pesan; jangan retry |
 | 404 | Data tidak ditemukan | Tampilkan pesan; jangan retry |
 | 413 | Body > 20 MB | Kompres foto (bagian 7.6); jangan retry dengan body yang sama |
@@ -222,6 +225,16 @@ Hanya role unit (Tim, Kepala, Admin Keamanan, role kustom) yang boleh login dari
 Jika login menjawab 403 `your role is not allowed to sign in on this platform`, akun tersebut akun pusat
 (Super-Admin/Manager Keamanan): tampilkan "Akun pusat hanya dapat digunakan melalui web admin." Jika pesan ini
 muncul untuk **semua** akun, aplikasi memakai App ID/Key platform yang salah — periksa konfigurasi build.
+
+**Cek license saat aplikasi dibuka:** `GET /api/v1/license/status` (tanpa token, cukup signature) →
+`status`, `locked`, `message`, `expires_at`, `grace_until`, `days_left`. Jika `locked = true`, tampilkan layar
+"Sistem belum memiliki license aktif. Hubungi administrator." sebagai pengganti layar login (Tim/Kepala/Admin tidak
+bisa login sampai license dipasang di web). Simpan hasil terakhir untuk offline; saat offline jangan blokir aplikasi
+hanya karena tidak bisa mengecek. Antrian scan tetap disimpan.
+
+**License.** Response login, refresh, dan `GET /auth/me` berisi `license`: `status` (`active`/`grace`/...),
+`expires_at`, `grace_until`, `days_left`. Jika `status = grace`, tampilkan banner di Dashboard: "License sistem
+sudah berakhir, hubungi administrator." Selain itu tidak perlu ditampilkan di mobile.
 
 ### 4.2 Membuka aplikasi dengan sesi tersimpan
 

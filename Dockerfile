@@ -8,9 +8,23 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
+# garble obfuscates the license code (names and string literals) so the checks
+# are hard to find and patch in the binary. Only the license packages are
+# obfuscated: the models must keep their names, because GORM derives table and
+# column names from them. OBFUSCATE=false gives a plain build (e.g. for debugging).
+ARG OBFUSCATE=true
+ARG GARBLE_VERSION=v0.14.2
+RUN if [ "$OBFUSCATE" = "true" ]; then go install mvdan.cc/garble@${GARBLE_VERSION}; fi
+
 COPY . .
 # Pure Go (pgx, pigo, excelize): no cgo needed, the binary is fully static.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/secure-patrol-backend .
+ENV CGO_ENABLED=0 GOOS=linux \
+    GOGARBLE=secure-patrol-backend/pkg/license,secure-patrol-backend/modules/license/...,secure-patrol-backend/middleware
+RUN if [ "$OBFUSCATE" = "true" ]; then \
+        garble -literals build -trimpath -ldflags="-s -w" -o /out/secure-patrol-backend . ; \
+    else \
+        go build -trimpath -ldflags="-s -w" -o /out/secure-patrol-backend . ; \
+    fi
 
 # ---- run ----
 FROM alpine:3.20

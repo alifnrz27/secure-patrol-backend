@@ -19,6 +19,8 @@ type Values struct {
 	LoginLockMinutes           int
 	AccessTokenTTLMinutes      int
 	RefreshTokenTTLDays        int
+	ExportMaxRangeDays         int
+	ExportPhotoMaxRangeDays    int
 
 	// Raw holds the canonical text value of every key, defaults included.
 	Raw map[string]string
@@ -100,6 +102,8 @@ func buildValues(layers []map[string]string, warn func(key, value string, err er
 		LoginLockMinutes:           integer("login_lock_minutes"),
 		AccessTokenTTLMinutes:      integer("access_token_ttl_minutes"),
 		RefreshTokenTTLDays:        integer("refresh_token_ttl_days"),
+		ExportMaxRangeDays:         integer("export_max_range_days"),
+		ExportPhotoMaxRangeDays:    integer("export_photo_max_range_days"),
 		Raw:                        raw,
 	}
 }

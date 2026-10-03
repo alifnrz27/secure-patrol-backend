@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"secure-patrol-backend/models"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"time"
 )
 
@@ -60,6 +61,31 @@ func UnitIsUsable(user models.User) bool {
 		return true
 	}
 	return user.UnitID != nil && user.Unit != nil && user.Unit.IsActive
+}
+
+// checkLicense lets only the Super-Admin in while the license is not active,
+// and refuses users of units above the license unit limit.
+func checkLicense(user models.User) error {
+	licenses := licenseservice.Instance()
+	if licenses == nil {
+		return nil
+	}
+	if licenses.Status().Locked() {
+		if user.Role.Code == models.RoleSuperAdmin {
+			return nil
+		}
+		return licenseservice.ErrLicenseInactive
+	}
+	if user.UnitID != nil && !models.IsCentralRole(user.Role.Code) {
+		allowed, err := licenses.UnitAllowed(*user.UnitID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return licenseservice.ErrUnitOverLicense
+		}
+	}
+	return nil
 }
 
 type AuthService interface {

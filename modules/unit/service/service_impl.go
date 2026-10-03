@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"secure-patrol-backend/models"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/modules/unit/repository"
 	"strings"
 
@@ -36,6 +37,11 @@ func (s *service) CreateUnit(unit models.Unit, actorID int64) (models.Unit, erro
 	if err := s.checkCodeAvailable(unit.Code, 0); err != nil {
 		return unit, err
 	}
+	if unit.IsActive {
+		if err := checkLicense(); err != nil {
+			return unit, err
+		}
+	}
 
 	unit.CreatedBy = &actorID
 	unit.UpdatedBy = &actorID
@@ -59,6 +65,12 @@ func (s *service) UpdateUnit(id int64, input models.Unit, actorID int64) (models
 	code := NormalizeCode(input.Code)
 	if code != unit.Code {
 		if err := s.checkCodeAvailable(code, unit.ID); err != nil {
+			return unit, err
+		}
+	}
+
+	if input.IsActive && !unit.IsActive {
+		if err := checkLicense(); err != nil {
 			return unit, err
 		}
 	}
@@ -120,4 +132,12 @@ func (s *service) checkCodeAvailable(code string, exceptID int64) error {
 // NormalizeCode trims and upper-cases a unit code, so "jkt-01" and "JKT-01" are the same unit.
 func NormalizeCode(code string) string {
 	return strings.ToUpper(strings.TrimSpace(code))
+}
+
+// checkLicense refuses a new active unit when the license unit limit is reached.
+func checkLicense() error {
+	if licenses := licenseservice.Instance(); licenses != nil {
+		return licenses.CanActivateUnit()
+	}
+	return nil
 }

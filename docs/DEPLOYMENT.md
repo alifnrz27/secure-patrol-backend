@@ -17,11 +17,16 @@ Internet ──HTTPS──▶ nginx (server) ──▶ secure-backend (127.0.0.1
 | `secure-backend-logs` | Volume log aplikasi |
 | `secure-redis` | Opsional (`--profile redis`), hanya jika backend dijalankan lebih dari satu container |
 
-Menjalankan atau menjalankan ulang cukup satu perintah di folder project:
+Ada dua cara instalasi:
 
-```bash
-docker compose up -d --build
-```
+| Cara | Untuk | Kode sumber di server |
+|---|---|---|
+| **A. Image privat** (`deploy/customer/`) | **Server pelanggan** (on-premise) | Tidak ada; hanya image ter-obfuscate dari registry privat |
+| **B. Build dari source** (`docker-compose.yml` di root) | Server milik vendor (staging/development) | Ada (`git clone`) |
+
+**Jangan pernah memberi pelanggan akses ke repository.** Dengan kode sumber, pemeriksaan license bisa dihapus.
+
+Setiap instalasi wajib memasang **license** (bagian 5b). Tanpa license, hanya Super-Admin yang bisa login.
 
 ## 1. Siapkan server
 
@@ -40,7 +45,18 @@ sudo ufw allow OpenSSH && sudo ufw allow 'Nginx Full' && sudo ufw enable
 timedatectl    # pastikan "System clock synchronized: yes"
 ```
 
-## 2. Ambil kode
+## 2. Siapkan folder
+
+**A. Server pelanggan (image privat).** Vendor memberikan dua file dari `deploy/customer/` (`docker-compose.yml`,
+`.env_example`) dan satu **token baca** registry (lihat bagian 12).
+
+```bash
+sudo mkdir -p /opt/secure-patrol && sudo chown $USER /opt/secure-patrol && cd /opt/secure-patrol
+# salin docker-compose.yml dan .env_example dari vendor ke folder ini
+echo "<token dari vendor>" | docker login ghcr.io -u <username dari vendor> --password-stdin
+```
+
+**B. Server vendor (build dari source).**
 
 ```bash
 git clone https://github.com/alifnrz27/secure-patrol-backend.git /opt/secure-patrol-backend
@@ -91,7 +107,8 @@ REDIS_HOST = ""                    # "secure-redis" jika memakai profile redis
 - **`DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` hanya dipakai saat database dibuat pertama kali.** Setelah volume
   `secure-postgres-data` ada, mengubah nilai ini di `.env` **tidak** mengubah user/password di database; ubah
   password lewat `ALTER USER` (bagian 11) lalu samakan `.env`.
-- **`APP_MASTER_SECRET` tidak boleh diganti** setelah dipakai: semua App ID/App Key akan tidak valid.
+- **`APP_MASTER_SECRET` tidak boleh diganti** setelah dipakai: semua App ID/App Key akan tidak valid, dan
+  **Install ID berubah sehingga license berhenti berfungsi** (harus minta license baru ke vendor).
   Simpan salinan `.env` di tempat aman (password manager / vault).
 - `MTSEL_*` dan `RABBITMQ_*` tidak dipakai; boleh dihapus dari `.env`.
 - Aturan patroli, lockout login, masa berlaku token, dan validasi wajah **tidak** diatur di `.env`; nilainya ada di
@@ -100,7 +117,8 @@ REDIS_HOST = ""                    # "secure-redis" jika memakai profile redis
 ## 4. Jalankan
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d     # A. image privat (server pelanggan)
+docker compose up -d --build                    # B. build dari source (server vendor)
 ```
 
 Compose menjalankan `secure-postgres` lebih dulu, menunggu database siap, baru menjalankan `secure-backend`.
@@ -132,6 +150,30 @@ Selanjutnya dari web admin:
 1. Super-Admin membuat **unit** (menu Unit). Setiap unit baru otomatis mendapat 3 shift default.
 2. Super-Admin membuat Kepala/Admin Keamanan untuk setiap unit (pilih unitnya), serta Manager Keamanan (pusat).
 3. Kepala/Admin Keamanan mengatur titik patroli, shift, petugas, dan setting unitnya sendiri.
+
+## 5b. License
+
+Tanpa license aktif sistem **terkunci**: hanya Super-Admin yang bisa login, dan hanya untuk memasang license.
+
+```bash
+# 1. Ambil Install ID, kirim ke vendor
+docker compose exec backend /app/secure-patrol-backend license-info
+
+# 2. Pasang kode license dari vendor (kode panjang diawali SPL1.)
+docker compose exec backend /app/secure-patrol-backend license-install -code "SPL1...."
+```
+
+`license-info` juga menampilkan status, tanggal berakhir, dan pemakaian (unit dan App Client aktif terhadap
+batas license). Perpanjangan bisa dipasang dari web admin (**Pengaturan → License**, Super-Admin) atau dengan
+perintah yang sama.
+
+- License berisi batas **unit aktif** dan **App Client aktif**, tanggal berakhir, dan masa tenggang.
+- Unit/App Client di atas batas (termasuk yang diaktifkan langsung di database) tidak berfungsi; yang paling lama
+  tetap jalan. Pemeriksaan ulang berjalan setiap menit.
+- Setelah masa tenggang habis, sistem terkunci sampai license baru dipasang. Data tidak dihapus.
+- **Jam server harus akurat.** Jika jam server mundur lebih dari 1 hari dibanding data yang sudah tercatat, license
+  dianggap tidak valid.
+- Membuat pasangan kunci dan menerbitkan license (vendor): `docs/LICENSE_SPEC.md`.
 
 ## 6. nginx dan HTTPS
 
@@ -180,7 +222,8 @@ Semua perintah dijalankan di `/opt/secure-patrol-backend`.
 
 | Kebutuhan | Perintah |
 |---|---|
-| Update ke kode terbaru | `git pull && docker compose up -d --build` |
+| Update (A. image privat) | ubah `IMAGE_TAG` di `.env` (atau biarkan `latest`), lalu `docker compose pull && docker compose up -d` |
+| Update (B. build dari source) | `git pull && docker compose up -d --build` |
 | Terapkan perubahan `.env` | `docker compose up -d --force-recreate` |
 | Restart backend | `docker compose restart backend` |
 | Hentikan semua | `docker compose down` |
@@ -198,6 +241,11 @@ Semua perintah dijalankan di `/opt/secure-patrol-backend`.
   tidak tersentuh.
 
 ## 8. Rollback
+
+**A. Image privat:** isi `IMAGE_TAG` di `.env` dengan versi sebelumnya (mis. `1.0.0`), lalu
+`docker compose pull && docker compose up -d`.
+
+**B. Build dari source:**
 
 Simpan image yang sedang jalan sebelum update, supaya bisa kembali jika versi baru bermasalah:
 
@@ -266,6 +314,11 @@ Untuk tool di laptop (DBeaver, TablePlus): buka komentar `ports: - "127.0.0.1:54
 | Semua request 401 `request timestamp is invalid or outside the allowed window` | Jam server atau jam HP/komputer pengguna meleset > 5 menit; aktifkan NTP (`sudo timedatectl set-ntp true`) |
 | IP di audit log selalu `172.x.x.x` | `PROXY_HEADER` / `TRUSTED_PROXIES` belum diisi, atau nginx tidak mengirim `X-Forwarded-For` |
 | Container `unhealthy` | `docker compose logs backend`; pastikan `PORT` di `.env` sama dengan port di nginx |
+| Semua login selain Super-Admin `403 license is not active, contact your administrator` | License belum dipasang, berakhir, atau tidak valid. Cek `license-info` (bagian 5b) |
+| `license-info`: `the server clock (...) is behind data already recorded` | Jam server mundur. Aktifkan NTP (`sudo timedatectl set-ntp true`); status pulih dalam 1 menit |
+| `this license was issued for another installation` | Install ID berbeda (license milik instalasi lain, atau `APP_MASTER_SECRET` diganti). Minta license untuk Install ID dari `license-info` |
+| User unit: `403 your unit exceeds the license limit` / request: `this app client exceeds the license limit` | Unit/App Client aktif melebihi license. Nonaktifkan yang tidak dipakai atau minta upgrade license |
+| `docker compose pull`: `denied` / `unauthorized` | Token registry salah/dicabut; ulangi `docker login ghcr.io` dengan token dari vendor |
 
 **Mengganti password database** (setelah database sudah dibuat):
 
@@ -281,3 +334,29 @@ ALTER USER secure_patrol WITH PASSWORD 'PASSWORD_BARU';
 ```
 
 Lalu isi `DB_PASSWORD = "PASSWORD_BARU"` di `.env` dan jalankan `docker compose up -d --force-recreate`.
+
+## 12. Rilis image (vendor)
+
+Image untuk pelanggan dibangun oleh GitHub Actions (`.github/workflows/release-image.yml`) dan disimpan di GitHub
+Container Registry **privat**. Kode license di dalam binary di-obfuscate dengan `garble` (hanya paket license, agar
+nama tabel database tidak berubah).
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0     # -> ghcr.io/alifnrz27/secure-patrol-backend:1.0.0 dan :latest
+```
+
+Sekali saja:
+
+1. Setelah workflow pertama selesai, buka GitHub → profil → **Packages** → `secure-patrol-backend` →
+   **Package settings**: pastikan **Visibility: Private**.
+2. Token untuk pelanggan: buat akun GitHub khusus (mis. `securepatrol-deploy`), undang ke package dengan akses
+   **Read**, lalu buat **Personal access token (classic)** di akun itu dengan scope **`read:packages`** saja. Beri
+   pelanggan username + token tersebut. Sebaiknya satu token per pelanggan agar bisa dicabut sendiri-sendiri
+   (hentikan update untuk pelanggan yang tidak memperpanjang).
+
+**Menerbitkan license** memakai private key yang hanya ada di laptop/generator vendor — lihat `docs/LICENSE_SPEC.md`.
+Private key tidak pernah masuk ke repository, image, atau server pelanggan.
+
+**Server vendor yang sudah berjalan** (build dari source, mis. staging): setelah update ke versi dengan license,
+sistem terkunci sampai license dipasang. Jalankan `license-info`, terbitkan license untuk Install ID tersebut, lalu
+`license-install`.

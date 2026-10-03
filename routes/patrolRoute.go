@@ -21,4 +21,5 @@ func PatrolRouter(app *fiber.App, db *gorm.DB) {
 
 	// Create patrol groups automatically when a shift starts.
 	go patrolService.RunScheduler(context.Background())
+	go patrolService.BackfillThumbnails(context.Background())
 }

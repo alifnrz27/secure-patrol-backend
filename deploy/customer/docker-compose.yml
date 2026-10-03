@@ -1,0 +1,55 @@
+# Secure Patrol for a customer installation: the backend image is pulled from
+# the private registry (no source code on the server) + its own PostgreSQL.
+#
+#   docker login ghcr.io -u <user> -p <read-only token from the vendor>   (once)
+#   docker compose pull && docker compose up -d                           (install / update)
+#
+# All configuration comes from .env next to this file (see docs/DEPLOYMENT.md).
+# IMAGE_TAG in .env pins a version (default: latest).
+
+services:
+  backend:
+    image: ghcr.io/alifnrz27/secure-patrol-backend:${IMAGE_TAG:-latest}
+    container_name: secure-backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Only reachable from this server (nginx); not exposed to the internet.
+    ports:
+      - "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - backend-storage:/app/storage
+      - backend-logs:/app/logs
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: secure-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+      POSTGRES_USER: ${DB_USERNAME:?set DB_USERNAME in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      TZ: ${DB_TIMEZONE:-Asia/Jakarta}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: secure-redis
+    restart: unless-stopped
+    profiles: ["redis"]
+
+volumes:
+  postgres-data:
+    name: secure-postgres-data
+  backend-storage:
+    name: secure-backend-storage
+  backend-logs:
+    name: secure-backend-logs

@@ -54,6 +54,10 @@ var Definitions = []Definition{
 		Description: "Lifetime of an access token"},
 	{Key: "refresh_token_ttl_days", Public: true, Group: "security", Type: TypeInteger, Default: "30", Min: 1, Max: 365, Unit: "days",
 		Description: "How long a user stays signed in without entering the password"},
+	{Key: "export_max_range_days", Group: "export", Type: TypeInteger, Default: "7", Min: 1, Max: 366, Unit: "days",
+		Description: "Longest shift date range of one scan history Excel export"},
+	{Key: "export_photo_max_range_days", Group: "export", Type: TypeInteger, Default: "1", Min: 1, Max: 31, Unit: "days",
+		Description: "Longest shift date range of one Excel export that includes photos (photos make the file large and slow to build)"},
 }
 
 func definition(key string) (Definition, bool) {

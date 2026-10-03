@@ -64,6 +64,9 @@ func (s *service) Login(email string, password string, client ClientInfo) (Token
 	if !UnitIsUsable(user) {
 		return TokenPair{}, ErrUnitInactive
 	}
+	if err := checkLicense(user); err != nil {
+		return TokenPair{}, err
+	}
 
 	// Checked after the password, so the answer does not reveal the role of an account.
 	if !models.RoleCanUsePlatform(user.Role.Code, client.AppPlatform) {
@@ -141,6 +144,9 @@ func (s *service) Refresh(refreshToken string, client ClientInfo) (TokenPair, er
 	if !UnitIsUsable(user) {
 		return TokenPair{}, ErrUnitInactive
 	}
+	if err := checkLicense(user); err != nil {
+		return TokenPair{}, err
+	}
 
 	if !models.RoleCanUsePlatform(user.Role.Code, client.AppPlatform) {
 		return TokenPair{}, ErrPlatformNotAllowed
@@ -190,6 +196,9 @@ func (s *service) Authenticate(accessToken string, appID string, appPlatform str
 	// Checked on every request so deactivating a unit signs its users out at once.
 	if !UnitIsUsable(user) {
 		return Principal{}, ErrUnitInactive
+	}
+	if err := checkLicense(user); err != nil {
+		return Principal{}, err
 	}
 
 	// Re-checked on every request so the rule also applies to tokens issued

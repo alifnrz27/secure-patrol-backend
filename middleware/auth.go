@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"secure-patrol-backend/helper"
 	"secure-patrol-backend/modules/auth/service"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -22,7 +23,8 @@ func BearerAuth(authService service.AuthService) fiber.Handler {
 		}
 
 		principal, err := authService.Authenticate(authHeader[7:], helper.CurrentAppID(c), helper.CurrentAppPlatform(c))
-		if errors.Is(err, service.ErrPlatformNotAllowed) || errors.Is(err, service.ErrUnitInactive) {
+		if errors.Is(err, service.ErrPlatformNotAllowed) || errors.Is(err, service.ErrUnitInactive) ||
+			errors.Is(err, licenseservice.ErrLicenseInactive) || errors.Is(err, licenseservice.ErrUnitOverLicense) {
 			response := helper.APIResponse("Forbidden", http.StatusForbidden, "Error", err.Error())
 			return c.Status(http.StatusForbidden).JSON(response)
 		}

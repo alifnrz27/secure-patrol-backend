@@ -6,7 +6,10 @@ storage/
 logs/
 *.log
 
-# Not needed for the build
+# Not needed for the build. tools/ holds the vendor license tool, which never
+# goes into a customer image.
+tools/
+deploy/
 .git/
 .github/
 .idea/

@@ -297,3 +297,36 @@ Setting berlaku **per unit**:
 | `face_min_size_ratio` | 0.2 | Ukuran wajah minimal di foto acuan (0,05–0,9) | |
 | `face_max_tilt_degrees` | 20 | Kemiringan kepala maksimal di foto acuan (1–45°) | |
 | `face_max_turn_ratio` | 0.12 | Batas kepala menoleh di foto acuan (0,01–0,5) | |
+| `export_max_range_days` | 7 | Rentang tanggal shift maksimal satu export Excel (1–366 hari) | |
+| `export_photo_max_range_days` | 1 | Rentang maksimal export Excel **dengan foto** (1–31 hari) | |
+
+## 8. License
+
+Setiap instalasi wajib memiliki license aktif dari vendor. Format dan cara menerbitkan: `docs/LICENSE_SPEC.md`.
+
+| Status | Kondisi | Akibat |
+|---|---|---|
+| `missing` | Belum ada license | **Terkunci**: hanya Super-Admin bisa login, hanya `/auth/*`, `/app-config`, `/license` |
+| `active` | Berlaku | Normal. `days_left` terisi mulai 30 hari sebelum berakhir (untuk banner) |
+| `grace` | Lewat `expires_at`, masih dalam `grace_days` | Normal + banner peringatan |
+| `expired` | Masa tenggang habis | **Terkunci** |
+| `invalid` | Kode diubah, license instalasi lain, atau jam server dimundurkan | **Terkunci** |
+
+- Saat terkunci, login role selain Super-Admin dan semua request selain yang di atas mendapat HTTP 403
+  `license is not active, contact your administrator` (request ber-token: `data.license_status`). Token yang sudah
+  ada langsung ditolak; scan dari mobile juga ditolak.
+- License membatasi jumlah **unit aktif** dan **App Client aktif**. Membuat/mengaktifkan di atas batas ditolak 403
+  (`the license unit limit has been reached (N)`, `the license app client limit has been reached (N)`).
+  Jika batas terlampaui lewat database, yang paling lama tetap berfungsi dan yang terbaru ditolak:
+  user unit mendapat 403 `your unit exceeds the license limit, contact the head office`, request App Client
+  mendapat 403 `this app client exceeds the license limit`.
+- Response login, refresh, dan `GET /auth/me` berisi `license` (`status`, `expires_at`, `grace_until`, `days_left`).
+- **Sebelum login**, aplikasi memanggil `GET /api/v1/license/status` (cukup signature App Client, tanpa token):
+  `status`, `locked`, `message`, `expires_at`, `grace_until`, `days_left`. Tidak berisi Install ID atau data pelanggan.
+- Super-Admin: `GET /api/v1/license` (status, Install ID, batas & pemakaian) dan `PUT /api/v1/license`
+  (`{"code": "SPL1...."}`) dari web. Instalasi baru: `secure-patrol-backend license-install -code ...`.
+- Keamanan: license ditandatangani Ed25519 oleh vendor; backend hanya memegang public key sehingga tidak bisa
+  membuat atau mengubah license. Install ID diturunkan dari `APP_MASTER_SECRET`. Batas selalu dibaca dari kode yang
+  diverifikasi (bukan kolom database), pemakaian dihitung dari data sebenarnya, dan worker memeriksa ulang setiap
+  menit termasuk jam server yang dimundurkan. Pelanggaran dicatat di audit log (`source = license`).
+

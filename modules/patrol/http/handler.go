@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"secure-patrol-backend/helper"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	"secure-patrol-backend/modules/patrol/dto"
 	"secure-patrol-backend/modules/patrol/service"
 	"secure-patrol-backend/pkg/log"
@@ -219,7 +220,8 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 		DateTo:        to,
 	}
 
-	scans, err := h.service.ExportScans(actor(c), filter)
+	withPhotos, _ := strconv.ParseBool(c.Query("include_photos"))
+	scans, err := h.service.ExportScans(actor(c), filter, withPhotos)
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -239,21 +241,26 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 
 	now := time.Now()
 	content, err := dto.BuildScanExcel(scans, dto.ScanExportMeta{
-		ExportedAt: now,
-		ExportedBy: exportedBy,
-		Unit:       names.Unit,
-		Shift:      names.Shift,
-		Point:      names.Point,
-		Officer:    names.User,
-		DateFrom:   from,
-		DateTo:     to,
-		Location:   helper.AppLocation(),
+		ExportedAt:    now,
+		ExportedBy:    exportedBy,
+		Unit:          names.Unit,
+		Shift:         names.Shift,
+		Point:         names.Point,
+		Officer:       names.User,
+		IncludePhotos: withPhotos,
+		DateFrom:      from,
+		DateTo:        to,
+		Location:      helper.AppLocation(),
 	})
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
 
-	filename := "riwayat-scan_" + now.In(helper.AppLocation()).Format("20060102-150405") + ".xlsx"
+	prefix := "riwayat-scan_"
+	if withPhotos {
+		prefix = "riwayat-scan-foto_"
+	}
+	filename := prefix + now.In(helper.AppLocation()).Format("20060102-150405") + ".xlsx"
 	c.Set(fiber.HeaderContentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	c.Set(fiber.HeaderContentDisposition, `attachment; filename="`+filename+`"`)
 	c.Set(fiber.HeaderCacheControl, "private, no-store")
@@ -294,21 +301,46 @@ func (h *PatrolHandler) GetScanPhoto(c *fiber.Ctx) error {
 	return c.SendFile(path)
 }
 
+// GetPointSummary returns the patrol total per patrol point of one shift in one
+// unit: ?group_id= (one shift on one date) or ?shift_id=&date_from=&date_to=.
+func (h *PatrolHandler) GetPointSummary(c *fiber.Ctx) error {
+	from, to, errs := dateRange(c)
+	if errs != nil {
+		return validationError(c, errs)
+	}
+
+	summary, err := h.service.PointSummary(actor(c), dto.PointSummaryFilter{
+		GroupID:  int64(c.QueryInt("group_id", 0)),
+		ShiftID:  int64(c.QueryInt("shift_id", 0)),
+		DateFrom: from,
+		DateTo:   to,
+	})
+	if err != nil {
+		return h.errorResponse(c, err)
+	}
+
+	response := helper.APIResponse("Get patrol point summary success", http.StatusOK, "success", summary)
+	return c.Status(http.StatusOK).JSON(response)
+}
+
 func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 	code := http.StatusInternalServerError
 	message := "Internal server error"
 
 	var locationErr *service.LocationOutOfRangeError
+	var rangeErr *service.ExportRangeError
 
 	switch {
-	case errors.Is(err, service.ErrScanNeedsUnit), errors.Is(err, service.ErrPointOfOtherUnit):
+	case errors.Is(err, service.ErrScanNeedsUnit), errors.Is(err, service.ErrPointOfOtherUnit),
+		errors.Is(err, licenseservice.ErrLicenseInactive), errors.Is(err, licenseservice.ErrUnitOverLicense):
 		code, message = http.StatusForbidden, err.Error()
 	case errors.Is(err, service.ErrGroupNotFound),
 		errors.Is(err, service.ErrScanNotFound),
 		errors.Is(err, service.ErrUnitNotFound),
+		errors.Is(err, service.ErrShiftNotFound),
 		errors.Is(err, service.ErrNFCNotRegistered):
 		code, message = http.StatusNotFound, err.Error()
-	case errors.As(err, &locationErr),
+	case errors.As(err, &locationErr), errors.As(err, &rangeErr),
 		errors.Is(err, service.ErrNoActiveShift),
 		errors.Is(err, service.ErrScannedAtInFuture),
 		errors.Is(err, service.ErrScanTooOld),
@@ -320,6 +352,9 @@ func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 		errors.Is(err, helper.ErrFileTooLarge),
 		errors.Is(err, helper.ErrFileTypeNotAllowed),
 		errors.Is(err, service.ErrExportTooLarge),
+		errors.Is(err, service.ErrExportPhotosTooLarge),
+		errors.Is(err, service.ErrExportRangeRequired),
+		errors.Is(err, service.ErrSummaryTargetMissing),
 		errors.Is(err, service.ErrUnitRequired),
 		errors.Is(err, service.ErrDateRangeInvalid):
 		code, message = http.StatusUnprocessableEntity, err.Error()

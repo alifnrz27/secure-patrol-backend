@@ -51,6 +51,19 @@ info:
       (`403 your unit is inactive, contact the head office`).
     - Kode NFC unik di **semua unit**.
 
+    ## License
+    Setiap instalasi wajib memiliki license aktif (lihat `docs/LICENSE_SPEC.md`). License menentukan jumlah
+    maksimal **unit aktif** dan **App Client (App ID/Key) aktif**, tanggal berakhir, dan masa tenggang.
+    - **Tanpa license / berakhir (lewat masa tenggang) / tidak valid**: sistem **terkunci total**. Hanya Super-Admin
+      yang bisa login, dan hanya endpoint `/auth/*`, `/app-config`, dan `/license` yang bisa dipakai; lainnya `403`
+      `license is not active, contact your administrator` (`data.license_status`). Login role lain juga `403`.
+    - **Masa tenggang**: tetap berjalan normal; `license.status = grace` di response login/profil untuk banner.
+    - Unit atau App Client di atas batas (termasuk yang diaktifkan langsung di database) tidak berfungsi: yang
+      paling lama tetap jalan, yang terbaru ditolak (`403 your unit exceeds the license limit, contact the head office`
+      / `403 this app client exceeds the license limit`). Membuat/mengaktifkan di atas batas ditolak `403`.
+    - Response login, refresh, dan `/auth/me` berisi `license` (status, tanggal berakhir, sisa hari).
+    - Sebelum login, aplikasi mengecek `GET /license/status` (tanpa token) untuk menampilkan layar terkunci.
+
     ## Penghapusan data
     Semua endpoint `DELETE` melakukan **soft delete**: data disembunyikan dari API tetapi tetap tersimpan di
     database (kolom `deleted_at`). Nilai unik milik data yang dihapus (email user, kode NFC, kode role) dilepas
@@ -87,6 +100,8 @@ tags:
     description: Pengaturan sistem yang bisa diubah tanpa restart (disimpan di database)
   - name: Branding
     description: Nama dan logo aplikasi (diubah Super-Admin)
+  - name: License
+    description: Status dan pemasangan license (Super-Admin)
 security:
   - AppId: []
     AppKey: []
@@ -1074,6 +1089,46 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /patrol-point-summary:
+    get:
+      operationId: getPatrolPointSummary
+      tags: [Patrol Groups]
+      summary: Total patroli per titik dalam satu shift di satu unit
+      description: |
+        Akses: Super-Admin, Manager Keamanan (semua unit), Kepala/Admin Keamanan (unit sendiri), semua platform.
+        Isi salah satu:
+        - `group_id`: satu shift pada satu tanggal (satu group), atau
+        - `shift_id` (+ opsional `date_from`, `date_to`): shift tersebut di rentang tanggal shift.
+
+        Unit mengikuti shift/group. Semua titik pada daftar patroli group ikut ditampilkan, termasuk yang belum
+        pernah di-scan (`total_scans` = 0). Shift/group unit lain dijawab 404 untuk user unit.
+      parameters:
+        - name: group_id
+          in: query
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/ShiftId'
+        - $ref: '#/components/parameters/DateFrom'
+        - $ref: '#/components/parameters/DateTo'
+      responses:
+        '200':
+          description: Total per titik
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PointSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: '`group_id or shift_id is required`, `date_from must not be after date_to`, format tanggal salah'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /patrol-scans:
     post:
       operationId: scanPatrolPoint
@@ -1179,10 +1234,22 @@ paths:
       description: |
         **Hanya platform web.** Menghasilkan file `.xlsx` dengan sheet **Riwayat Scan** dan **Filter**.
         Kolom: Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Unit, Shift, Titik, Lokasi, Kondisi, Catatan,
-        Petugas, Email petugas. User unit hanya mengekspor data unitnya. Waktu ditulis sebagai tanggal Excel dalam zona waktu aplikasi (WIB), diurutkan dari
+        Petugas, Email petugas. User unit hanya mengekspor data unitnya.
+
+        **Rentang tanggal wajib** (`date_from` dan `date_to`, tanggal shift, inklusif). Panjang maksimal diatur di
+        setting `export_max_range_days` (default 7 hari) dan, jika `include_photos=true`,
+        `export_photo_max_range_days` (default **1 hari**). Setting mengikuti unit user (pusat: nilai global).
+
+        `include_photos=true` menambah kolom **Foto 1–3** berisi thumbnail foto scan (maks. 320×240, diputar sesuai
+        EXIF) yang ditempel di sel; baris berfoto lebih tinggi. Foto yang file-nya hilang ditulis
+        `foto tidak ditemukan`. Export dengan foto dibatasi 2.000 baris dan nama file diawali `riwayat-scan-foto_`. Waktu ditulis sebagai tanggal Excel dalam zona waktu aplikasi (WIB), diurutkan dari
         scan terlama. "Dikirim offline" = Ya jika diterima server lebih dari 5 menit setelah waktu scan.
-        Maksimal 50.000 baris per file.
+        Maksimal 50.000 baris per file (tanpa foto).
       parameters:
+        - name: include_photos
+          in: query
+          description: Sertakan thumbnail foto scan (kolom Foto 1–3)
+          schema: { type: boolean, default: false }
         - $ref: '#/components/parameters/UnitId'
         - $ref: '#/components/parameters/ShiftId'
         - name: patrol_point_id
@@ -1206,7 +1273,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422':
-          description: '`date_from must not be after date_to`, format tanggal salah, atau lebih dari 50.000 baris'
+          description: |
+            `date_from and date_to are required for an export`, `date_from must not be after date_to`, format tanggal
+            salah, `an export can cover at most N days, ...`, `an export with photos can cover only 1 day, ...`,
+            atau melebihi batas baris (50.000 / 2.000 dengan foto)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -1535,6 +1605,80 @@ paths:
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '422':
           description: '`logo size must not exceed 1 MB`, `file must be a JPEG or PNG image`, atau `app_name` kosong / lebih dari 100 karakter'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /license/status:
+    get:
+      operationId: getLicenseStatus
+      tags: [License]
+      summary: Cek status license (tanpa login)
+      description: |
+        **Tanpa login** (cukup request bertanda tangan App Client), semua platform. Dipanggil aplikasi saat dibuka,
+        sebelum halaman login: jika `locked = true`, tampilkan layar "license belum aktif" — hanya Super-Admin yang
+        boleh login (web) untuk memasang license di halaman License. Tidak berisi data pelanggan atau Install ID.
+      security:
+        - AppId: []
+          AppKey: []
+      responses:
+        '200':
+          description: Status license
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/LicensePublicStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /license:
+    get:
+      operationId: getLicense
+      tags: [License]
+      summary: Status license, Install ID, batas dan pemakaian
+      description: |
+        **Hanya platform web.** Akses: Super-Admin. Tetap bisa diakses saat sistem terkunci.
+        `install_id` dikirim ke vendor untuk mendapatkan license.
+      responses:
+        '200':
+          description: Status license
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenseResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: installLicense
+      tags: [License]
+      summary: Pasang license baru (atau perpanjangan)
+      description: |
+        **Hanya platform web.** Akses: Super-Admin. Tetap bisa diakses saat sistem terkunci. License yang dipasang
+        terakhir yang berlaku. Instalasi baru tanpa App Client bisa memasang lewat CLI:
+        `secure-patrol-backend license-install -code "SPL1...."`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, example: 'SPL1.eyJsaWQiOi....X2sig' }
+      responses:
+        '200':
+          description: License terpasang; status terbaru
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenseResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: |
+            `license code is malformed`, `license code signature is invalid`, `license code content is invalid: ...`,
+            `this license was issued for another installation`, `this license has already expired`
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -1874,6 +2018,7 @@ components:
         user: { $ref: '#/components/schemas/LoginUser' }
         config: { $ref: '#/components/schemas/AppConfig' }
         settings: { $ref: '#/components/schemas/AppSettings' }
+        license: { $ref: '#/components/schemas/LicenseSummary' }
     AppConfig:
       type: object
       description: Pengaturan untuk aplikasi mobile (validasi sebelum scan dan mode offline).
@@ -2105,6 +2250,49 @@ components:
                     items:
                       type: array
                       items: { $ref: '#/components/schemas/PatrolListItem' }
+    PointSummary:
+      type: object
+      properties:
+        unit:
+          type: object
+          properties:
+            id: { type: integer, format: int64 }
+            code: { type: string, example: UNIT-UTAMA }
+            name: { type: string, example: Unit Utama }
+        shift:
+          type: object
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string, example: Shift 1 }
+        group_id: { type: integer, format: int64, nullable: true, description: Terisi jika memakai group_id }
+        date_from: { type: string, format: date }
+        date_to: { type: string, format: date }
+        groups: { type: integer, description: Jumlah group (shift × tanggal) yang dihitung, example: 1 }
+        totals:
+          type: object
+          properties:
+            points: { type: integer, example: 15 }
+            scanned_points: { type: integer, example: 12 }
+            unscanned_points: { type: integer, example: 3 }
+            total_scans: { type: integer, example: 40 }
+            abnormal_scans: { type: integer, example: 2 }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              patrol_point_id: { type: integer, format: int64 }
+              name: { type: string, example: Parking Area }
+              location: { type: string, example: Basement 1 }
+              nfc_code: { type: string, example: '04:A2:1F:9C' }
+              groups: { type: integer, description: Jumlah group yang memuat titik ini }
+              scanned_groups: { type: integer, description: Jumlah group di mana titik ini di-scan minimal sekali }
+              total_scans: { type: integer, example: 3 }
+              normal_scans: { type: integer, example: 2 }
+              abnormal_scans: { type: integer, example: 1 }
+              officers: { type: integer, description: Jumlah petugas berbeda yang men-scan, example: 2 }
+              first_scanned_at: { type: string, format: date-time, nullable: true }
+              last_scanned_at: { type: string, format: date-time, nullable: true }
     PatrolUserSummary:
       type: object
       properties:
@@ -2287,12 +2475,13 @@ components:
                 - type: object
                   properties:
                     settings: { $ref: '#/components/schemas/AppSettings' }
+                    license: { $ref: '#/components/schemas/LicenseSummary' }
     Setting:
       type: object
       properties:
         key: { type: string, example: patrol_location_radius_meters }
         level: { type: string, enum: [global, unit], description: Level daftar ini }
-        group: { type: string, enum: [patrol, face, security] }
+        group: { type: string, enum: [patrol, face, security, export] }
         type: { type: string, enum: [integer, number, boolean] }
         value: { description: Nilai saat ini (number atau boolean), example: 100 }
         default_value: { description: Nilai default, example: 100 }
@@ -2326,6 +2515,70 @@ components:
         app_name: { type: string, maxLength: 100, example: Secure Patrol }
         logo: { type: string, format: binary, description: 'Opsional. JPEG/PNG, maksimal 1 MB' }
         remove_logo: { type: boolean, default: false, description: 'true = hapus logo, aplikasi memakai logo bawaan' }
+    LicensePublicStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [missing, active, grace, expired, invalid] }
+        locked: { type: boolean, description: true = aplikasi terkunci; hanya Super-Admin boleh login untuk memasang license }
+        message: { type: string, example: 'no license is installed, the Super-Admin must install one' }
+        expires_at: { type: string, format: date-time, nullable: true }
+        grace_until: { type: string, format: date-time, nullable: true }
+        days_left: { type: integer, nullable: true, description: 'Sisa hari (aktif: hanya jika ≤ 30 hari; grace: sampai terkunci)' }
+    LicenseSummary:
+      type: object
+      nullable: true
+      description: Ringkasan license untuk banner (login, refresh, /auth/me)
+      properties:
+        status: { type: string, enum: [missing, active, grace, expired, invalid] }
+        expires_at: { type: string, format: date-time, nullable: true }
+        grace_until: { type: string, format: date-time, nullable: true }
+        days_left:
+          type: integer
+          nullable: true
+          description: Sisa hari sampai berakhir (aktif, hanya jika ≤ 30 hari) atau sampai masa tenggang habis (grace)
+    License:
+      type: object
+      properties:
+        status: { type: string, enum: [missing, active, grace, expired, invalid] }
+        reason: { type: string, description: 'Penjelasan jika tidak aktif, mis. "the server clock ... is behind data already recorded"' }
+        locked: { type: boolean, description: true = hanya Super-Admin yang bisa bekerja }
+        install_id: { type: string, example: SP-Y3HW-ZDCK-C4CO-BY6F }
+        license:
+          type: object
+          nullable: true
+          properties:
+            license_id: { type: string, example: LIC-20261001-8F3A2C }
+            customer: { type: string, example: PT Contoh Aman }
+            issued_at: { type: string, format: date-time }
+            expires_at: { type: string, format: date-time }
+            grace_days: { type: integer, example: 14 }
+            grace_until: { type: string, format: date-time }
+        days_left: { type: integer, nullable: true }
+        limits:
+          type: object
+          properties:
+            units:
+              type: object
+              properties:
+                max: { type: integer, example: 5 }
+                used: { type: integer, example: 3 }
+            app_clients:
+              type: object
+              properties:
+                max: { type: integer, example: 3 }
+                used: { type: integer, example: 3 }
+        over_limit:
+          type: object
+          properties:
+            units: { type: boolean }
+            app_clients: { type: boolean }
+        checked_at: { type: string, format: date-time }
+    LicenseResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data: { $ref: '#/components/schemas/License' }
     SettingsResponse:
       allOf:
         - $ref: '#/components/schemas/Envelope'

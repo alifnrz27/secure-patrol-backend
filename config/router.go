@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 	auditlogservice "secure-patrol-backend/modules/auditlog/service"
 	authrepository "secure-patrol-backend/modules/auth/repository"
 	authservice "secure-patrol-backend/modules/auth/service"
+	licenseservice "secure-patrol-backend/modules/license/service"
 	applog "secure-patrol-backend/pkg/log"
 	"secure-patrol-backend/pkg/nonce"
 	"secure-patrol-backend/routes"
@@ -83,9 +85,13 @@ func Route(db *gorm.DB) {
 	// Public group api's (app signature only)
 	routes.PublicRouter(api, db)
 	routes.BrandingPublicRouter(api, db)
+	routes.LicensePublicRouter(api, db)
 
 	// Authenticated group api's (app signature + user access token)
 	api.Use(middleware.BearerAuth(authService))
+
+	// Without an active license only the Super-Admin may work, to install one.
+	api.Use(middleware.LicenseGuard())
 
 	// Record every successful create, update and delete made by a logged in user
 	api.Use(middleware.AuditLog(auditLogService))
@@ -113,6 +119,11 @@ func Route(db *gorm.DB) {
 	routes.AuditLogRouter(api, db)
 	routes.SettingRouter(api, db)
 	routes.BrandingRouter(api, db)
+	routes.LicenseRouter(api, db)
+
+	if licenses := licenseservice.Instance(); licenses != nil {
+		go licenses.RunWorker(context.Background())
+	}
 
 	app.Mount("/api/v1", api)
 

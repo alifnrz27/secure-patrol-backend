@@ -24,6 +24,8 @@ func Migrate(db *gorm.DB) error {
 		&models.AuditLog{},
 		&models.SystemSetting{},
 		&models.Branding{},
+		&models.License{},
+		&models.LicenseState{},
 	}
 
 	for _, model := range migrationModels {

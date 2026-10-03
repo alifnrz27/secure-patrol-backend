@@ -39,7 +39,14 @@ type PatrolRepository interface {
 	FindScanByClientID(userID int64, clientScanID string) (models.PatrolScan, error)
 	FindScanByID(id int64) (models.PatrolScan, error)
 	FindScans(filter dto.ScanFilter) ([]models.PatrolScan, int64, error)
-	FindScansForExport(filter dto.ScanFilter, limit int) ([]models.PatrolScan, error)
+	FindScansForExport(filter dto.ScanFilter, limit int, withPhotos bool) ([]models.PatrolScan, error)
 	FilterNames(unitID, shiftID, patrolPointID, userID int64) (FilterNames, error)
 	CreateScan(scan *models.PatrolScan) error
+
+	// FindPhotoPathsSince lists scan photos received since t, newest first.
+	FindPhotoPathsSince(t time.Time) ([]string, error)
+	FindShift(id int64) (models.PatrolShift, error)
+	FindUnit(id int64) (models.Unit, error)
+	// PointSummary totals the scans per patrol point over the matching groups of one unit.
+	PointSummary(unitID int64, filter dto.PointSummaryFilter) (rows []dto.PointSummaryRow, groups int64, err error)
 }

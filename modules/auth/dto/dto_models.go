@@ -1,6 +1,7 @@
 package dto
 
 import (
+	licensehttp "secure-patrol-backend/modules/license/http"
 	userdto "secure-patrol-backend/modules/user/dto"
 	"time"
 )
@@ -31,12 +32,15 @@ type TokenDTO struct {
 	Config           AppConfigDTO `json:"config"`
 	// Settings are the adjustable settings the apps need (radius, lockout, token lifetimes, ...).
 	Settings map[string]interface{} `json:"settings"`
+	// License is the license status, for banners (expiring soon, grace period).
+	License *licensehttp.LicenseSummaryDTO `json:"license"`
 }
 
 // ProfileDTO is the logged in user's profile together with the app settings.
 type ProfileDTO struct {
 	userdto.UserDTO
-	Settings map[string]interface{} `json:"settings"`
+	Settings map[string]interface{}         `json:"settings"`
+	License  *licensehttp.LicenseSummaryDTO `json:"license"`
 }
 
 // AppConfigDTO holds the settings the mobile app needs to validate a scan
