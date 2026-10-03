@@ -14,7 +14,10 @@ RUN go mod download
 # column names from them. OBFUSCATE=false gives a plain build (e.g. for debugging).
 ARG OBFUSCATE=true
 ARG GARBLE_VERSION=v0.14.2
-RUN if [ "$OBFUSCATE" = "true" ]; then go install mvdan.cc/garble@${GARBLE_VERSION}; fi
+# garble patches the Go linker with git, which the alpine image does not include.
+RUN if [ "$OBFUSCATE" = "true" ]; then \
+        apk add --no-cache git && go install mvdan.cc/garble@${GARBLE_VERSION} ; \
+    fi
 
 COPY . .
 # Pure Go (pgx, pigo, excelize): no cgo needed, the binary is fully static.

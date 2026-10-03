@@ -8,7 +8,13 @@
 
 services:
   backend:
-    build: .
+    build:
+      context: .
+      # This compose builds from source on our own servers, where the source is
+      # already present, so obfuscation adds nothing and only slows the build.
+      # Customer images are built obfuscated by .github/workflows/release-image.yml.
+      args:
+        OBFUSCATE: ${OBFUSCATE:-false}
     image: secure-backend:latest
     container_name: secure-backend
     restart: unless-stopped
