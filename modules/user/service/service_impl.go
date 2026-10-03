@@ -37,8 +37,18 @@ func NewUserService(
 	}
 }
 
+// hiddenRoles are the roles whose users an actor may not see or manage: a
+// Security Admin does not reach the Security Heads of the unit.
+func hiddenRoles(actorRole string) []string {
+	if actorRole == models.RoleSecurityAdmin {
+		return []string{models.RoleSecurityHead}
+	}
+	return nil
+}
+
 // GetUsers expects the filter to be limited to the actor's unit by the caller.
-func (s *service) GetUsers(filter dto.UserFilter) ([]models.User, int64, error) {
+func (s *service) GetUsers(actor Actor, filter dto.UserFilter) ([]models.User, int64, error) {
+	filter.HiddenRoles = hiddenRoles(actor.RoleCode)
 	return s.repo.FindAll(filter)
 }
 
@@ -52,6 +62,9 @@ func (s *service) GetUserByID(actor Actor, id int64) (models.User, error) {
 	}
 	// Users of other units (and head office users) do not exist for a unit manager.
 	if actor.UnitID != nil && (user.UnitID == nil || *user.UnitID != *actor.UnitID) {
+		return models.User{}, ErrUserNotFound
+	}
+	if helper.Includes(hiddenRoles(actor.RoleCode), user.Role.Code) {
 		return models.User{}, ErrUserNotFound
 	}
 	return user, nil
@@ -266,6 +279,9 @@ func (s *service) checkAssignableRole(actor Actor, roleID int64) (models.Role, e
 	}
 
 	if models.IsCentralRole(role.Code) && actor.RoleCode != models.RoleSuperAdmin {
+		return role, ErrForbiddenRole
+	}
+	if helper.Includes(hiddenRoles(actor.RoleCode), role.Code) {
 		return role, ErrForbiddenRole
 	}
 

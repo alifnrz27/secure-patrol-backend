@@ -28,7 +28,7 @@ type Actor struct {
 }
 
 type UserService interface {
-	GetUsers(filter dto.UserFilter) ([]models.User, int64, error)
+	GetUsers(actor Actor, filter dto.UserFilter) ([]models.User, int64, error)
 	// GetUserByID only finds users the actor may see (unit managers: their own unit).
 	GetUserByID(actor Actor, id int64) (models.User, error)
 	CreateUser(actor Actor, user models.User, password string, facePhoto *multipart.FileHeader) (models.User, error)

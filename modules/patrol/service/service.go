@@ -39,6 +39,9 @@ var (
 	ErrExportRangeRequired   = errors.New("date_from and date_to are required for an export")
 	ErrSummaryTargetMissing  = errors.New("group_id or shift_id is required")
 	ErrShiftNotFound         = errors.New("patrol shift not found")
+	ErrItemNotFound          = errors.New("patrol list item not found")
+	ErrShiftNotRunning       = errors.New("officers can only be assigned to points of the running shift")
+	ErrAssigneeInvalid       = errors.New("assignees must be active security admins or security team members of the unit")
 	ErrDateRangeInvalid      = errors.New("date_from must not be after date_to")
 	ErrUnitRequired          = errors.New("unit_id is required")
 	ErrUnitNotFound          = errors.New("unit not found")
@@ -79,6 +82,8 @@ type Actor struct {
 	RoleCode string
 	// UnitID is the unit of a unit user; nil for head office users.
 	UnitID *int64
+	// Platform of the app client (android, ios, web, server).
+	Platform string
 }
 
 func (a Actor) scope() helper.Scope {
@@ -121,6 +126,8 @@ type PatrolService interface {
 	// users pass the unit.
 	GetCurrentGroup(actor Actor, unitID int64) (models.PatrolGroup, []models.PatrolListItem, error)
 	GetItems(actor Actor, filter dto.ItemFilter) ([]models.PatrolListItem, int64, error)
+	// SetAssignees replaces the officers assigned to a point of the running shift.
+	SetAssignees(actor Actor, itemID int64, userIDs []int64) (models.PatrolListItem, error)
 
 	// Scan records an NFC scan. duplicate is true when the same client_scan_id
 	// was already stored (e.g. an offline sync retry) and the stored scan is returned.

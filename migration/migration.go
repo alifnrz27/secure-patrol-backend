@@ -21,6 +21,7 @@ func Migrate(db *gorm.DB) error {
 		&models.PatrolListItem{},
 		&models.PatrolScan{},
 		&models.PatrolScanPhoto{},
+		&models.PatrolListItemAssignee{},
 		&models.HelpDeskArticle{},
 		&models.AuditLog{},
 		&models.SystemSetting{},
@@ -58,6 +59,7 @@ func ensureCaseInsensitiveUniqueIndexes(db *gorm.DB) error {
 		{"idx_users_email_lower", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email))"},
 		{"idx_patrol_points_nfc_code_upper", "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_points_nfc_code_upper ON patrol_points (UPPER(nfc_code))"},
 		// Area names are unique within a unit; deleted areas free their name.
+		{"idx_patrol_list_item_assignees_item_user", "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_list_item_assignees_item_user ON patrol_list_item_assignees (patrol_list_item_id, user_id) WHERE deleted_at IS NULL"},
 		{"idx_patrol_areas_unit_name", "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_areas_unit_name ON patrol_areas (unit_id, LOWER(name)) WHERE deleted_at IS NULL"},
 	}
 

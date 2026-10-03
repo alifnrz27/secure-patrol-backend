@@ -46,6 +46,8 @@ type UserFilter struct {
 	UnitID int64
 	// HeadOfficeOnly limits the list to users without a unit.
 	HeadOfficeOnly bool
+	// HiddenRoles leaves out users with these role codes (see service.hiddenRoles).
+	HiddenRoles []string
 }
 
 // CreateUserRequest is sent as multipart/form-data together with the face_photo file.

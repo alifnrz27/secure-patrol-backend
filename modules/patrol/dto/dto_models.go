@@ -74,6 +74,9 @@ type PatrolListItemDTO struct {
 	LastScannedAt            *time.Time       `json:"last_scanned_at"`
 	LastScannedBy            *UserSummaryDTO  `json:"last_scanned_by"`
 	LastCondition            *string          `json:"last_condition"`
+	// Assignees are the officers assigned to this point for this shift; empty
+	// means everyone in the unit patrols it.
+	Assignees []UserSummaryDTO `json:"assignees"`
 }
 
 type ScanPointDTO struct {

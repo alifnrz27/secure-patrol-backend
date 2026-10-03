@@ -9,6 +9,7 @@ import (
 type Values struct {
 	PatrolLocationRadiusMeters float64
 	PatrolMaxOfflineHours      int
+	PatrolPointAssignment      bool
 	FaceMobileAccuracy         float64
 	FaceMatchMinScore          float64
 	FacePhotoValidation        bool
@@ -92,6 +93,7 @@ func buildValues(layers []map[string]string, warn func(key, value string, err er
 	return Values{
 		PatrolLocationRadiusMeters: number("patrol_location_radius_meters"),
 		PatrolMaxOfflineHours:      integer("patrol_max_offline_hours"),
+		PatrolPointAssignment:      boolean("patrol_point_assignment"),
 		FaceMobileAccuracy:         number("face_mobile_accuracy"),
 		FaceMatchMinScore:          number("face_match_min_score"),
 		FacePhotoValidation:        boolean("face_photo_validation"),

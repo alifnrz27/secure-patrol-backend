@@ -248,7 +248,9 @@ Request `{"email", "password"}` (trim email). Response berisi `access_token`, `e
 - **User unit** (`security_head`, `security_admin`) hanya melihat unitnya. Sembunyikan pemilih unit; tampilkan
   nama unit di header. Server mengabaikan `unit_id` dari mereka.
 - **Manager Keamanan hanya memantau**: semua halaman dalam mode baca.
-- Kepala Keamanan dan Admin Keamanan saat ini punya hak yang sama, tetapi tetap role berbeda.
+- Kepala Keamanan dan Admin Keamanan punya hak yang sama, **kecuali** Admin Keamanan tidak melihat dan tidak bisa
+  mengelola user Kepala Keamanan (server menyembunyikannya dari daftar dan menjawab 404/403). Sembunyikan role
+  Kepala Keamanan dari pilihan role saat login sebagai Admin Keamanan.
 
 Hanya empat role berikut yang bisa login di web (bagian 5.1). Tampilkan menu dan tombol sesuai tabel ini; tetap
 tangani 403 dari server.
@@ -363,6 +365,17 @@ loading selama unduhan.
   `an export can cover at most N days, ...`, `an export with photos can cover only 1 day, ...`,
   `export is limited to 50000 rows, ...`, `an export with photos is limited to 2000 rows, ...`. Tampilkan
   pesan dalam Bahasa Indonesia di dialog.
+
+**Penugasan titik ke petugas (shift berjalan)** — aktif jika setting unit `patrol_point_assignment` = `true`
+(tombol ON/OFF di Pengaturan Sistem unit, label "Penugasan titik per petugas").
+- Di Dashboard/Monitoring group **yang sedang berjalan**, setiap titik menampilkan `assignees` dan tombol
+  **Tugaskan** (Kepala/Admin Keamanan) → pilih satu atau beberapa petugas dari `GET /api/v1/users` (role Admin
+  Keamanan / Tim Keamanan, aktif, unit sendiri) → `PUT /api/v1/patrol-list-items/{item_id}/assignees`
+  `{"user_ids": [..]}`; `[]` menghapus penugasan. Tombol disembunyikan untuk group yang sudah selesai.
+- Keterangan di UI: "Titik tanpa petugas terlihat oleh semua petugas. Penugasan hanya berlaku untuk shift ini."
+- Jika setting OFF, penugasan tetap bisa diisi tetapi belum berlaku (tampilkan peringatan).
+- Error 422: `officers can only be assigned to points of the running shift`,
+  `assignees must be active security admins or security team members of the unit`.
 
 **Area di monitoring dan laporan** — item daftar patroli, scan (`patrol_point.area_name`), dan rekap per titik
 membawa `area_id` + `area_name` (nama area saat shift berjalan). Kelompokkan daftar titik per area (dengan subtotal),

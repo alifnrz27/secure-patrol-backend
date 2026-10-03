@@ -22,6 +22,9 @@ var CentralRoles = []string{RoleSuperAdmin, RoleSecurityManager}
 // UnitManagerRoles manage the data of their own unit.
 var UnitManagerRoles = []string{RoleSecurityHead, RoleSecurityAdmin}
 
+// AssignableRoles can be assigned to patrol points of the running shift.
+var AssignableRoles = []string{RoleSecurityAdmin, RoleSecurityTeam}
+
 func IsCentralRole(code string) bool {
 	return code == RoleSuperAdmin || code == RoleSecurityManager
 }

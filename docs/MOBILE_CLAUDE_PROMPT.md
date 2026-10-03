@@ -374,6 +374,9 @@ Tampilkan:
   jumlah temuan tidak normal, jumlah scan pending, status online/offline.
 - Daftar titik **dikelompokkan per area** (`area_name` setiap item, urutan dari server sudah per area; item dengan
   `area_name` kosong masuk kelompok "Lainnya"), dengan progres per area (mis. "Gedung A 3/5") dan chip filter area.
+- **Penugasan titik:** jika unit mengaktifkan penugasan, server sudah menyaring daftar untuk Admin/Tim Keamanan:
+  hanya titik yang ditugaskan kepadanya + titik tanpa petugas. Setiap item punya `assignees` (daftar petugas);
+  tandai titik yang ditugaskan ke user yang login ("Tugas Anda"). Tidak perlu logika penyaringan di aplikasi.
 - Setiap titik: nama, lokasi, ikon kewajiban (📍 lokasi, 🙂 wajah), dan status terakhir:
   - **Belum di-scan** (`is_scanned = false`)
   - **Normal** / **Tidak Normal** dari `last_condition`, dengan `last_scanned_at` dan `last_scanned_by.name`

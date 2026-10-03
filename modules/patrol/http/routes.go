@@ -13,6 +13,12 @@ func PatrolRoutes(app *fiber.App, handler *PatrolHandler) {
 	app.Get("/patrol-groups/:id", handler.GetGroup)
 
 	app.Get("/patrol-list-items", handler.GetItems)
+	// Unit heads and admins assign officers to points of the running shift (web).
+	app.Put("/patrol-list-items/:id/assignees",
+		middleware.RequirePlatforms(models.PlatformWeb),
+		middleware.RequireRoles(models.UnitManagerRoles...),
+		handler.SetAssignees,
+	)
 
 	// Patrol total per patrol point of one shift in one unit (web reports and dashboards).
 	app.Get("/patrol-point-summary", middleware.RequireRoles(models.WebRoles...), handler.GetPointSummary)

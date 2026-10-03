@@ -34,6 +34,8 @@ var Definitions = []Definition{
 		Description: "Maximum distance between the phone and a patrol point that requires a location match"},
 	{Key: "patrol_max_offline_hours", Public: true, Group: "patrol", Type: TypeInteger, Default: "24", Min: 1, Max: 720, Unit: "hours",
 		Description: "Oldest offline scan that is still accepted"},
+	{Key: "patrol_point_assignment", Group: "patrol", Type: TypeBoolean, Default: "false",
+		Description: "Assign patrol points of the running shift to officers: an assigned point is only shown to its assignees, points without assignees to everyone"},
 	{Key: "face_mobile_accuracy", Public: true, Group: "face", Type: TypeNumber, Default: "0.75", Min: 0, Max: 1,
 		Description: "Face match score (0-1) the mobile app needs to mark a face as verified"},
 	{Key: "face_match_min_score", Group: "face", Type: TypeNumber, Default: "0", Min: 0, Max: 1,

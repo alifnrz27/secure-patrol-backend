@@ -22,6 +22,8 @@ type ItemFilter struct {
 	DateFrom string
 	DateTo   string
 	Status   string // scanned | unscanned
+	// VisibleTo hides points assigned to other officers (0 = show all).
+	VisibleTo int64
 }
 
 type ScanFilter struct {

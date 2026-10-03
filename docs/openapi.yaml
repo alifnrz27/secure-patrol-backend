@@ -466,7 +466,7 @@ paths:
       operationId: listUsers
       tags: [Users]
       summary: Daftar user
-      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan (semua unit); Kepala Keamanan, Admin Keamanan (unitnya sendiri).'
+      description: '**Hanya platform web.** Akses: Super-Admin, Manager Keamanan (semua unit); Kepala Keamanan, Admin Keamanan (unitnya sendiri). Admin Keamanan tidak melihat user Kepala Keamanan (detail/ubah/reset juga 404) dan tidak bisa memberi role Kepala Keamanan (403).'
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
@@ -1232,6 +1232,56 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
           description: '`group_id or shift_id is required`, `date_from must not be after date_to`, format tanggal salah'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /patrol-list-items/{id}/assignees:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      operationId: setPatrolPointAssignees
+      tags: [Patrol Groups]
+      summary: Tugaskan petugas ke titik pada shift yang sedang berjalan
+      description: |
+        **Hanya platform web.** Akses: Kepala Keamanan, Admin Keamanan (unit sendiri). `{id}` adalah id item daftar
+        patroli (titik di group shift **yang sedang berjalan**); group yang sudah selesai/belum mulai ditolak 422.
+        Mengganti seluruh daftar petugas titik itu; `user_ids: []` menghapus penugasan. Satu titik boleh lebih dari
+        satu petugas. Petugas harus user aktif unit itu dengan role **Admin Keamanan** atau **Tim Keamanan**.
+
+        Berlaku jika setting unit `patrol_point_assignment` = `true`: di aplikasi mobile, Admin/Tim Keamanan hanya
+        melihat titik yang ditugaskan kepadanya **ditambah titik tanpa petugas** (titik tanpa petugas terlihat oleh
+        semua). Web selalu menampilkan semua titik beserta `assignees`. Penugasan hanya untuk shift itu; shift
+        berikutnya mulai tanpa penugasan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_ids]
+              properties:
+                user_ids:
+                  type: array
+                  maxItems: 50
+                  items: { type: integer, format: int64 }
+                  example: [12, 15]
+      responses:
+        '200':
+          description: Item daftar patroli dengan petugas terbaru
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PatrolListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: '`officers can only be assigned to points of the running shift`, `assignees must be active security admins or security team members of the unit`'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -2457,6 +2507,10 @@ components:
         patrol_point_id: { type: integer, format: int64 }
         area_id: { type: integer, format: int64, nullable: true }
         area_name: { type: string, example: Gedung A, description: 'Nama area saat shift berjalan; "" jika tidak ada' }
+        assignees:
+          type: array
+          description: Petugas yang ditugaskan ke titik ini untuk shift ini; kosong = semua petugas unit
+          items: { $ref: '#/components/schemas/PatrolUserSummary' }
         name: { type: string, example: Main Gate }
         location: { type: string, example: Building A - Front Entrance }
         nfc_code: { type: string, example: '04:A2:1F:9C' }

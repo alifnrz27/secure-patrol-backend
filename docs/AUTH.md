@@ -183,6 +183,7 @@ Keamanan, dan role kustom adalah user **unit**: wajib punya satu unit dan hanya 
 | Tambah/ubah/hapus patrol point | **web** | | | ✓ (unit sendiri) | |
 | Lihat area titik patroli | semua | semua unit | semua unit | unit sendiri | unit sendiri |
 | Tambah/ubah/hapus area | **web** | | | ✓ (unit sendiri) | |
+| Tugaskan petugas ke titik (shift berjalan) | **web** | | | ✓ (unit sendiri) | |
 | Lihat shift, group, daftar patroli | semua | semua unit | semua unit | unit sendiri | unit sendiri |
 | Tambah/ubah/hapus shift | **web** | | | ✓ (unit sendiri) | |
 | Scan NFC patroli | **android/ios** | | | ✓ (titik unit sendiri) | ✓ (titik unit sendiri) |
@@ -201,7 +202,8 @@ Keamanan, dan role kustom adalah user **unit**: wajib punya satu unit dan hanya 
 | Lihat nama & logo aplikasi (`GET /branding`) | semua, **tanpa login** | ✓ | ✓ | ✓ | ✓ |
 | Ubah nama & logo aplikasi | **web** | ✓ | | | |
 
-Kepala Keamanan dan Admin Keamanan saat ini punya hak akses yang sama, tetapi tetap role yang berbeda.
+Kepala Keamanan dan Admin Keamanan punya hak akses yang sama, **kecuali** Admin Keamanan tidak bisa melihat,
+mengubah, me-reset password, atau membuat user Kepala Keamanan.
 
 - Role yang tidak boleh memakai platform tersebut (Tim Keamanan dan role kustom di web; Super-Admin dan Manager
   Keamanan di android/ios) ditolak dengan HTTP 403
@@ -299,6 +301,7 @@ Setting berlaku **per unit**:
 | `face_min_size_ratio` | 0.2 | Ukuran wajah minimal di foto acuan (0,05–0,9) | |
 | `face_max_tilt_degrees` | 20 | Kemiringan kepala maksimal di foto acuan (1–45°) | |
 | `face_max_turn_ratio` | 0.12 | Batas kepala menoleh di foto acuan (0,01–0,5) | |
+| `patrol_point_assignment` | false | Penugasan titik per petugas (per unit): jika `true`, Admin/Tim Keamanan di mobile hanya melihat titik yang ditugaskan + titik tanpa petugas | |
 | `export_max_range_days` | 7 | Rentang tanggal shift maksimal satu export Excel (1–366 hari) | |
 | `export_photo_max_range_days` | 1 | Rentang maksimal export Excel **dengan foto** (1–31 hari) | |
 

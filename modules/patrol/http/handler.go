@@ -328,6 +328,34 @@ func (h *PatrolHandler) GetPointSummary(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(response)
 }
 
+type assigneesRequest struct {
+	UserIDs []int64 `json:"user_ids" validate:"max=50"`
+}
+
+// SetAssignees replaces the officers assigned to a point of the running shift
+// (an empty list removes every assignee).
+func (h *PatrolHandler) SetAssignees(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return h.errorResponse(c, service.ErrItemNotFound)
+	}
+	var req assigneesRequest
+	if err := c.BodyParser(&req); err != nil {
+		response := helper.APIResponse("Invalid request body", http.StatusBadRequest, "Error", err.Error())
+		return c.Status(http.StatusBadRequest).JSON(response)
+	}
+	if errs := helper.ValidateStruct(req); errs != nil {
+		return validationError(c, errs)
+	}
+
+	item, err := h.service.SetAssignees(actor(c), int64(id), req.UserIDs)
+	if err != nil {
+		return h.errorResponse(c, err)
+	}
+	response := helper.APIResponse("Set patrol point assignees success", http.StatusOK, "success", h.dto.ToItemDTO(item, true))
+	return c.Status(http.StatusOK).JSON(response)
+}
+
 func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 	code := http.StatusInternalServerError
 	message := "Internal server error"
@@ -343,6 +371,7 @@ func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 		errors.Is(err, service.ErrScanNotFound),
 		errors.Is(err, service.ErrUnitNotFound),
 		errors.Is(err, service.ErrShiftNotFound),
+		errors.Is(err, service.ErrItemNotFound),
 		errors.Is(err, service.ErrNFCNotRegistered):
 		code, message = http.StatusNotFound, err.Error()
 	case errors.As(err, &locationErr), errors.As(err, &rangeErr),
@@ -360,6 +389,8 @@ func (h *PatrolHandler) errorResponse(c *fiber.Ctx, err error) error {
 		errors.Is(err, service.ErrExportPhotosTooLarge),
 		errors.Is(err, service.ErrExportRangeRequired),
 		errors.Is(err, service.ErrSummaryTargetMissing),
+		errors.Is(err, service.ErrShiftNotRunning),
+		errors.Is(err, service.ErrAssigneeInvalid),
 		errors.Is(err, service.ErrUnitRequired),
 		errors.Is(err, service.ErrDateRangeInvalid):
 		code, message = http.StatusUnprocessableEntity, err.Error()
@@ -376,6 +407,7 @@ func actor(c *fiber.Ctx) service.Actor {
 		UserID:   helper.CurrentUserID(c),
 		RoleCode: helper.CurrentRoleCode(c),
 		UnitID:   helper.CurrentScope(c).UnitID,
+		Platform: helper.CurrentAppPlatform(c),
 	}
 }
 

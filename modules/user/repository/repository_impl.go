@@ -30,6 +30,9 @@ func (r *repository) FindAll(filter dto.UserFilter) (users []models.User, total 
 	if filter.IsActive != nil {
 		query = query.Where("is_active = ?", *filter.IsActive)
 	}
+	if len(filter.HiddenRoles) > 0 {
+		query = query.Where("role_id NOT IN (?)", r.db.Model(&models.Role{}).Select("id").Where("code IN ?", filter.HiddenRoles))
+	}
 	if filter.UnitID > 0 {
 		query = query.Where("unit_id = ?", filter.UnitID)
 	} else if filter.HeadOfficeOnly {

@@ -8,6 +8,7 @@ import (
 )
 
 type PatrolDto interface {
+	ToItemDTO(item models.PatrolListItem, withGroup bool) PatrolListItemDTO
 	ToGroupDTO(group models.PatrolGroup) PatrolGroupDTO
 	ToGroupDTOs(groups []models.PatrolGroup) []PatrolGroupDTO
 	ToGroupDetailDTO(group models.PatrolGroup, items []models.PatrolListItem) PatrolGroupDetailDTO
@@ -109,6 +110,12 @@ func (d *dto) ToItemDTOs(items []models.PatrolListItem, withGroup bool) []Patrol
 			LastScannedBy:            userSummary(item.LastScannedByUser),
 			LastCondition:            item.LastCondition,
 		}
+		itemDTO.Assignees = make([]UserSummaryDTO, 0, len(item.Assignees))
+		for _, assignee := range item.Assignees {
+			if user := userSummary(assignee.User); user != nil {
+				itemDTO.Assignees = append(itemDTO.Assignees, *user)
+			}
+		}
 		if withGroup && item.PatrolGroup != nil {
 			summary := groupSummary(*item.PatrolGroup)
 			itemDTO.Group = &summary
@@ -166,4 +173,8 @@ func (d *dto) ToScanDTOs(scans []models.PatrolScan) []PatrolScanDTO {
 		result = append(result, d.ToScanDTO(scan))
 	}
 	return result
+}
+
+func (d *dto) ToItemDTO(item models.PatrolListItem, withGroup bool) PatrolListItemDTO {
+	return d.ToItemDTOs([]models.PatrolListItem{item}, withGroup)[0]
 }

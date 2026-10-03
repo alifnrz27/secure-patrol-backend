@@ -196,6 +196,9 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 	if filter.AreaID > 0 {
 		query = query.Where("patrol_list_items.area_id = ?", filter.AreaID)
 	}
+	if filter.VisibleTo > 0 {
+		query = visibleTo(query, filter.VisibleTo)
+	}
 	switch filter.Status {
 	case "scanned":
 		query = query.Where("patrol_list_items.scan_count > 0")
@@ -214,7 +217,7 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 		return nil, 0, err
 	}
 
-	err = query.
+	err = withAssignees(query).
 		Preload("PatrolGroup", withUnit).
 		Preload("LastScannedByUser", unscoped).
 		Order("patrol_groups.start_at DESC, patrol_list_items.area_name ASC, patrol_list_items.name ASC").
@@ -225,12 +228,62 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 	return items, total, err
 }
 
-func (r *repository) FindItemsByGroup(groupID int64) (items []models.PatrolListItem, err error) {
-	err = r.db.Preload("LastScannedByUser", unscoped).
-		Where("patrol_group_id = ?", groupID).
-		Order("area_name ASC, name ASC").
-		Find(&items).Error
+// visibleTo keeps the points without assignees and the points assigned to the user.
+func visibleTo(query *gorm.DB, userID int64) *gorm.DB {
+	return query.Where(`(NOT EXISTS (SELECT 1 FROM patrol_list_item_assignees a
+			WHERE a.patrol_list_item_id = patrol_list_items.id AND a.deleted_at IS NULL)
+		OR EXISTS (SELECT 1 FROM patrol_list_item_assignees a
+			WHERE a.patrol_list_item_id = patrol_list_items.id AND a.deleted_at IS NULL AND a.user_id = ?))`, userID)
+}
+
+func withAssignees(query *gorm.DB) *gorm.DB {
+	return query.
+		Preload("Assignees", func(db *gorm.DB) *gorm.DB { return db.Order("id ASC") }).
+		Preload("Assignees.User", unscoped)
+}
+
+func (r *repository) FindItemsByGroup(groupID int64, visible int64) (items []models.PatrolListItem, err error) {
+	query := withAssignees(r.db.Model(&models.PatrolListItem{})).
+		Preload("LastScannedByUser", unscoped).
+		Where("patrol_list_items.patrol_group_id = ?", groupID)
+	if visible > 0 {
+		query = visibleTo(query, visible)
+	}
+	err = query.Order("area_name ASC, name ASC").Find(&items).Error
 	return items, err
+}
+
+func (r *repository) FindItemByID(id int64) (item models.PatrolListItem, err error) {
+	err = withAssignees(r.db.Model(&models.PatrolListItem{})).
+		Preload("PatrolGroup").
+		Preload("LastScannedByUser", unscoped).
+		Where("patrol_list_items.id = ?", id).
+		First(&item).Error
+	return item, err
+}
+
+func (r *repository) ReplaceAssignees(itemID int64, userIDs []int64, assignedBy int64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("patrol_list_item_id = ?", itemID).Delete(&models.PatrolListItemAssignee{}).Error; err != nil {
+			return err
+		}
+		if len(userIDs) == 0 {
+			return nil
+		}
+		rows := make([]models.PatrolListItemAssignee, 0, len(userIDs))
+		for _, userID := range userIDs {
+			rows = append(rows, models.PatrolListItemAssignee{PatrolListItemID: itemID, UserID: userID, AssignedBy: &assignedBy})
+		}
+		return tx.Omit(clause.Associations).Create(&rows).Error
+	})
+}
+
+func (r *repository) FindAssignableUsers(unitID int64, ids []int64) (users []models.User, err error) {
+	err = r.db.Model(&models.User{}).
+		Joins("JOIN roles ON roles.id = users.role_id").
+		Where("users.id IN ? AND users.unit_id = ? AND users.is_active = ? AND roles.code IN ?", ids, unitID, true, models.AssignableRoles).
+		Find(&users).Error
+	return users, err
 }
 
 func (r *repository) FindItem(groupID int64, patrolPointID int64) (item models.PatrolListItem, err error) {

@@ -40,7 +40,7 @@ func (h *UserHandler) GetUsers(c *fiber.Ctx) error {
 		filter.IsActive = &isActive
 	}
 
-	users, total, err := h.service.GetUsers(filter)
+	users, total, err := h.service.GetUsers(actor(c), filter)
 	if err != nil {
 		return h.errorResponse(c, err)
 	}

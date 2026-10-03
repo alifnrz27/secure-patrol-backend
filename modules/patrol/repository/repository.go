@@ -34,7 +34,15 @@ type PatrolRepository interface {
 	SyncGroupItems(groupID int64, points []models.PatrolPoint) error
 
 	FindItems(filter dto.ItemFilter) ([]models.PatrolListItem, int64, error)
-	FindItemsByGroup(groupID int64) ([]models.PatrolListItem, error)
+	// FindItemsByGroup lists the patrol list of a group. With visibleTo > 0 the
+	// points assigned only to other officers are left out.
+	FindItemsByGroup(groupID int64, visibleTo int64) ([]models.PatrolListItem, error)
+	FindItemByID(id int64) (models.PatrolListItem, error)
+	// ReplaceAssignees sets the officers assigned to a patrol list item.
+	ReplaceAssignees(itemID int64, userIDs []int64, assignedBy int64) error
+	// FindAssignableUsers returns the active users among ids that belong to the
+	// unit and have an assignable role.
+	FindAssignableUsers(unitID int64, ids []int64) ([]models.User, error)
 	FindItem(groupID int64, patrolPointID int64) (models.PatrolListItem, error)
 
 	FindScanByClientID(userID int64, clientScanID string) (models.PatrolScan, error)

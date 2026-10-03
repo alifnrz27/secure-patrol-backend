@@ -78,6 +78,22 @@ type PatrolListItem struct {
 	CreatedAt                time.Time      `json:"created_at"`
 	UpdatedAt                time.Time      `json:"updated_at"`
 	DeletedAt                gorm.DeletedAt `json:"-" gorm:"index"`
+
+	Assignees []PatrolListItemAssignee `json:"-" gorm:"foreignKey:PatrolListItemID"`
+}
+
+// PatrolListItemAssignee assigns a patrol point of one patrol group (so only
+// for that shift) to an officer. When the unit turns assignments on, an
+// assigned point is only shown to its assignees; a point without assignees is
+// shown to everyone.
+type PatrolListItemAssignee struct {
+	ID               int64          `json:"id" gorm:"primaryKey"`
+	PatrolListItemID int64          `json:"patrol_list_item_id" gorm:"not null;index"`
+	UserID           int64          `json:"user_id" gorm:"not null;index"`
+	User             *User          `json:"-" gorm:"foreignKey:UserID"`
+	AssignedBy       *int64         `json:"assigned_by"`
+	CreatedAt        time.Time      `json:"created_at"`
+	DeletedAt        gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 // PatrolScan is one NFC scan. A point can be scanned many times in one group.

@@ -12,6 +12,8 @@ Detail lengkap ada di file yang disebut di setiap bagian; kontrak API ada di `/d
 | 5 | Export Excel: rentang wajib + foto | Dialog export | — | Web bagian 9 |
 | 6 | Total patroli per titik per shift | Rekap & laporan | — | Web bagian 9 |
 | 7 | Area titik patroli (gedung/lantai/parkir) | Menu Area + field di titik + filter | Kelompokkan daftar per area | Web 10.0a, Mobile bagian 6 |
+| 8 | Penugasan titik ke petugas (shift berjalan) | Tombol Tugaskan + ON/OFF di setting unit | Daftar sudah disaring server; bagian "Tugas Anda" | Web bagian 9, `UPDATE_ASSIGNMENT_MOBILE_PROMPT.md` |
+| 9 | Admin Keamanan tidak melihat Kepala Keamanan | Sembunyikan role Kepala di form user admin | — | Web bagian 6 |
 
 ---
 
@@ -125,14 +127,40 @@ Titik patroli dalam satu unit bisa dikelompokkan ke **area** (gedung, lantai, pa
 
 ---
 
+## 8. Penugasan titik ke petugas (shift berjalan)
+
+- Tombol ON/OFF per unit: setting `patrol_point_assignment` (default `false`), diubah Kepala/Admin di Pengaturan
+  Sistem unit.
+- `PUT /api/v1/patrol-list-items/{item_id}/assignees` `{"user_ids": [..]}` (Kepala/Admin Keamanan, web): menugaskan
+  satu atau beberapa petugas (role Admin Keamanan / Tim Keamanan unit itu) ke titik **pada shift yang sedang
+  berjalan**. `[]` menghapus penugasan. Shift yang sudah selesai → 422.
+- Item daftar patroli (`/patrol-groups/current`, `/patrol-groups/{id}`, `/patrol-list-items`) punya field baru
+  `assignees: [{id, name, email}]`.
+- Jika ON: di **mobile**, Admin/Tim Keamanan hanya menerima titik yang ditugaskan kepadanya + titik tanpa petugas
+  (server yang menyaring). Kepala Keamanan dan semua tampilan web tetap melihat semua titik.
+- Penugasan hanya berlaku untuk shift itu; shift berikutnya mulai tanpa penugasan.
+
+**Web:** tombol **Tugaskan** per titik pada group yang berjalan (pilih banyak petugas), tampilkan nama petugas,
+switch ON/OFF di Pengaturan Sistem unit.
+**Mobile:** tidak perlu menyaring; tampilkan bagian "Tugas Anda" — detail di `UPDATE_ASSIGNMENT_MOBILE_PROMPT.md`.
+
+## 9. Admin Keamanan dan Kepala Keamanan
+
+Admin Keamanan **tidak bisa melihat** user Kepala Keamanan di daftar pengguna (detail, ubah, reset password →
+404) dan **tidak bisa** membuat atau mengubah user menjadi Kepala Keamanan (403).
+**Web:** sembunyikan role Kepala Keamanan dari pilihan role saat yang login Admin Keamanan.
+
+---
+
 ## Setting baru (Pengaturan Sistem)
 
 | Key | Default | Keterangan |
 |---|---|---|
+| `patrol_point_assignment` | false | Penugasan titik per petugas (ON/OFF per unit) |
 | `export_max_range_days` | 7 | Rentang maksimal export Excel |
 | `export_photo_max_range_days` | 1 | Rentang maksimal export Excel dengan foto |
 
-Total setting sekarang 14 (grup baru: `export`).
+Total setting sekarang 15 (grup baru: `export`).
 
 ## Data uji (development)
 

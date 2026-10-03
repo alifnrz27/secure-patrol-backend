@@ -167,8 +167,66 @@ func (s *service) GetGroup(actor Actor, id int64) (models.PatrolGroup, []models.
 		return models.PatrolGroup{}, nil, ErrGroupNotFound
 	}
 
-	items, err := s.repo.FindItemsByGroup(group.ID)
+	items, err := s.repo.FindItemsByGroup(group.ID, s.visibleTo(actor, group.UnitID))
 	return group, items, err
+}
+
+// visibleTo returns the officer whose own patrol list is shown (points assigned
+// to others hidden), or 0 to show every point. It only applies in the mobile
+// apps, to assignable roles, while the unit has assignments turned on; the web
+// shows the full list with the assignees.
+func (s *service) visibleTo(actor Actor, unitID int64) int64 {
+	if actor.Platform != models.PlatformAndroid && actor.Platform != models.PlatformIOS {
+		return 0
+	}
+	if !helper.Includes(models.AssignableRoles, actor.RoleCode) {
+		return 0
+	}
+	if !settingservice.ForUnit(&unitID).PatrolPointAssignment {
+		return 0
+	}
+	return actor.UserID
+}
+
+func (s *service) SetAssignees(actor Actor, itemID int64, userIDs []int64) (models.PatrolListItem, error) {
+	item, err := s.repo.FindItemByID(itemID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return item, ErrItemNotFound
+	}
+	if err != nil {
+		return item, err
+	}
+	if item.PatrolGroup == nil || !actor.scope().CanAccessUnit(item.PatrolGroup.UnitID) {
+		return models.PatrolListItem{}, ErrItemNotFound
+	}
+
+	now := time.Now()
+	if now.Before(item.PatrolGroup.StartAt) || !now.Before(item.PatrolGroup.EndAt) {
+		return item, ErrShiftNotRunning
+	}
+
+	unique := make([]int64, 0, len(userIDs))
+	seen := map[int64]bool{}
+	for _, id := range userIDs {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) > 0 {
+		users, err := s.repo.FindAssignableUsers(item.PatrolGroup.UnitID, unique)
+		if err != nil {
+			return item, err
+		}
+		if len(users) != len(unique) {
+			return item, ErrAssigneeInvalid
+		}
+	}
+
+	if err := s.repo.ReplaceAssignees(item.ID, unique, actor.UserID); err != nil {
+		return item, err
+	}
+	return s.repo.FindItemByID(item.ID)
 }
 
 func (s *service) GetCurrentGroup(actor Actor, unitID int64) (models.PatrolGroup, []models.PatrolListItem, error) {
@@ -195,6 +253,9 @@ func (s *service) GetCurrentGroup(actor Actor, unitID int64) (models.PatrolGroup
 
 func (s *service) GetItems(actor Actor, filter dto.ItemFilter) ([]models.PatrolListItem, int64, error) {
 	filter.UnitID = actor.scope().UnitFilter(filter.UnitID)
+	if actor.UnitID != nil {
+		filter.VisibleTo = s.visibleTo(actor, *actor.UnitID)
+	}
 	return s.repo.FindItems(filter)
 }
 
