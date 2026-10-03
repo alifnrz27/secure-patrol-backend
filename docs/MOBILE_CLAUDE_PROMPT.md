@@ -372,7 +372,9 @@ Tampilkan:
 
 - Header: nama unit, nama shift, tanggal, jam mulai–selesai, sisa waktu shift, progres (`scanned_points / total_points`),
   jumlah temuan tidak normal, jumlah scan pending, status online/offline.
-- Daftar titik: nama, lokasi, ikon kewajiban (📍 lokasi, 🙂 wajah), dan status terakhir:
+- Daftar titik **dikelompokkan per area** (`area_name` setiap item, urutan dari server sudah per area; item dengan
+  `area_name` kosong masuk kelompok "Lainnya"), dengan progres per area (mis. "Gedung A 3/5") dan chip filter area.
+- Setiap titik: nama, lokasi, ikon kewajiban (📍 lokasi, 🙂 wajah), dan status terakhir:
   - **Belum di-scan** (`is_scanned = false`)
   - **Normal** / **Tidak Normal** dari `last_condition`, dengan `last_scanned_at` dan `last_scanned_by.name`
   - **Menunggu sinkron** jika ada scan pending lokal untuk titik tersebut (tampilkan kondisi dari scan lokal

@@ -27,7 +27,7 @@ func TestBuildScanExcel(t *testing.T) {
 			ReceivedAt:     scannedAt.Add(2 * time.Second),
 			Condition:      models.PatrolConditionNormal,
 			PatrolGroup:    models.PatrolGroup{UnitName: "Unit Utama", ShiftName: "Shift 1", ShiftDate: shiftDate},
-			PatrolListItem: models.PatrolListItem{Name: "Main Gate", Location: "Building A"},
+			PatrolListItem: models.PatrolListItem{Name: "Main Gate", Location: "Building A", AreaName: "Gedung A"},
 			ScannedByUser:  models.User{Name: "Budi", Email: "budi@securepatrol.local"},
 		},
 		{
@@ -64,9 +64,9 @@ func TestBuildScanExcel(t *testing.T) {
 	}
 
 	want := [][]string{
-		{"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Unit", "Shift", "Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas"},
-		{"29/09/2026 08:15:30", "29/09/2026 08:15:32", "Tidak", "29/09/2026", "Unit Utama", "Shift 1", "Main Gate", "Building A", "Normal", "", "Budi", "budi@securepatrol.local"},
-		{"29/09/2026 08:15:30", "29/09/2026 11:15:30", "Ya", "29/09/2026", "Unit Utama", "Shift 1", "Server Room", "Building A - 3rd Floor", "Tidak Normal", "Pintu tidak terkunci", "Andi (akun dihapus)", "andi@securepatrol.local"},
+		{"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Unit", "Shift", "Area", "Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas"},
+		{"29/09/2026 08:15:30", "29/09/2026 08:15:32", "Tidak", "29/09/2026", "Unit Utama", "Shift 1", "Gedung A", "Main Gate", "Building A", "Normal", "", "Budi", "budi@securepatrol.local"},
+		{"29/09/2026 08:15:30", "29/09/2026 11:15:30", "Ya", "29/09/2026", "Unit Utama", "Shift 1", "", "Server Room", "Building A - 3rd Floor", "Tidak Normal", "Pintu tidak terkunci", "Andi (akun dihapus)", "andi@securepatrol.local"},
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %v", len(rows), len(want), rows)
@@ -176,11 +176,11 @@ func TestBuildScanExcelWithPhotos(t *testing.T) {
 	defer f.Close()
 
 	rows, _ := f.GetRows("Riwayat Scan")
-	if got := rows[0][12:]; len(got) != 3 || got[0] != "Foto 1" || got[2] != "Foto 3" {
+	if got := rows[0][13:]; len(got) != 3 || got[0] != "Foto 1" || got[2] != "Foto 3" {
 		t.Fatalf("photo headers = %v", got)
 	}
 
-	for cell, wantSize := range map[string][2]int{"M2": {320, 240}, "N2": {120, 240}} {
+	for cell, wantSize := range map[string][2]int{"N2": {320, 240}, "O2": {120, 240}} {
 		pics, err := f.GetPictures("Riwayat Scan", cell)
 		if err != nil || len(pics) != 1 {
 			t.Fatalf("%s: %d pictures, err %v", cell, len(pics), err)
@@ -193,10 +193,10 @@ func TestBuildScanExcelWithPhotos(t *testing.T) {
 			t.Errorf("%s: thumbnail too large: %d bytes", cell, len(pics[0].File))
 		}
 	}
-	if value, _ := f.GetCellValue("Riwayat Scan", "O2"); value != "foto tidak ditemukan" {
+	if value, _ := f.GetCellValue("Riwayat Scan", "P2"); value != "foto tidak ditemukan" {
 		t.Errorf("missing photo cell = %q", value)
 	}
-	if pics, _ := f.GetPictures("Riwayat Scan", "M3"); len(pics) != 0 {
+	if pics, _ := f.GetPictures("Riwayat Scan", "N3"); len(pics) != 0 {
 		t.Error("scan without photos must have no picture")
 	}
 	if height, _ := f.GetRowHeight("Riwayat Scan", 2); height != photoRowHeight {

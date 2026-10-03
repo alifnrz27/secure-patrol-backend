@@ -17,6 +17,7 @@ type ItemFilter struct {
 	helper.Pagination
 	UnitID   int64
 	GroupID  int64
+	AreaID   int64
 	ShiftID  int64
 	DateFrom string
 	DateTo   string
@@ -32,5 +33,6 @@ type ScanFilter struct {
 	DateTo        string
 	ScannedBy     int64
 	PatrolPointID int64
+	AreaID        int64
 	Condition     string
 }

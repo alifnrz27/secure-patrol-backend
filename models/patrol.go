@@ -55,10 +55,14 @@ type PatrolGroup struct {
 
 // PatrolListItem is a copy of a patrol point inside a patrol group (the patrol list).
 type PatrolListItem struct {
-	ID                       int64          `json:"id" gorm:"primaryKey"`
-	PatrolGroupID            int64          `json:"patrol_group_id" gorm:"not null;uniqueIndex:idx_patrol_list_items_group_point"`
-	PatrolGroup              *PatrolGroup   `json:"-" gorm:"foreignKey:PatrolGroupID"`
-	PatrolPointID            int64          `json:"patrol_point_id" gorm:"not null;uniqueIndex:idx_patrol_list_items_group_point;index"`
+	ID            int64        `json:"id" gorm:"primaryKey"`
+	PatrolGroupID int64        `json:"patrol_group_id" gorm:"not null;uniqueIndex:idx_patrol_list_items_group_point"`
+	PatrolGroup   *PatrolGroup `json:"-" gorm:"foreignKey:PatrolGroupID"`
+	PatrolPointID int64        `json:"patrol_point_id" gorm:"not null;uniqueIndex:idx_patrol_list_items_group_point;index"`
+	// The area is copied like the other point data, so history keeps the area
+	// the point had during that shift.
+	AreaID                   *int64         `json:"area_id"`
+	AreaName                 string         `json:"area_name" gorm:"type:varchar(100);not null;default:''"`
 	Name                     string         `json:"name" gorm:"type:varchar(150);not null"`
 	Location                 string         `json:"location" gorm:"type:varchar(255);not null"`
 	NFCCode                  string         `json:"nfc_code" gorm:"column:nfc_code;type:varchar(100);not null"`

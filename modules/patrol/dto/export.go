@@ -19,10 +19,10 @@ const OfflineThreshold = 5 * time.Minute
 
 var scanExportHeaders = []string{
 	"Waktu scan", "Diterima server", "Dikirim offline", "Tanggal shift", "Unit", "Shift",
-	"Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas",
+	"Area", "Titik", "Lokasi", "Kondisi", "Catatan", "Petugas", "Email petugas",
 }
 
-var scanExportColumnWidths = []float64{20, 20, 15, 14, 24, 14, 26, 30, 14, 45, 26, 32}
+var scanExportColumnWidths = []float64{20, 20, 15, 14, 24, 14, 22, 26, 30, 14, 45, 26, 32}
 
 // Photo columns of an export with photos. Thumbnails are made at twice the
 // displayed size so they stay sharp when zoomed in Excel.
@@ -43,6 +43,7 @@ type ScanExportMeta struct {
 	ExportedAt time.Time
 	ExportedBy string
 	Unit       string
+	Area       string
 	Shift      string
 	Point      string
 	Officer    string
@@ -177,6 +178,7 @@ func scanRow(scan models.PatrolScan, meta ScanExportMeta, styles exportStyles) [
 		{StyleID: styles.date, Value: time.Date(shiftDate.Year(), shiftDate.Month(), shiftDate.Day(), 0, 0, 0, 0, time.UTC)},
 		text(scan.PatrolGroup.UnitName),
 		text(scan.PatrolGroup.ShiftName),
+		text(scan.PatrolListItem.AreaName),
 		text(scan.PatrolListItem.Name),
 		text(scan.PatrolListItem.Location),
 		condition,
@@ -367,6 +369,7 @@ func writeFilterSheet(f *excelize.File, rows int, meta ScanExportMeta) error {
 		{"Diekspor pada", meta.ExportedAt.In(meta.Location).Format("02/01/2006 15:04:05") + " (" + meta.Location.String() + ")"},
 		{"Diekspor oleh", meta.ExportedBy},
 		{"Unit", orAll(meta.Unit)},
+		{"Area", orAll(meta.Area)},
 		{"Shift", orAll(meta.Shift)},
 		{"Titik", orAll(meta.Point)},
 		{"Petugas", orAll(meta.Officer)},

@@ -34,7 +34,7 @@ func (r *repository) FindActiveShifts(unitID int64) (shifts []models.PatrolShift
 }
 
 func (r *repository) FindAllPatrolPoints(unitID int64) (points []models.PatrolPoint, err error) {
-	err = r.db.Where("unit_id = ?", unitID).Order("name ASC").Find(&points).Error
+	err = r.db.Preload("Area").Where("unit_id = ?", unitID).Order("name ASC").Find(&points).Error
 	return points, err
 }
 
@@ -131,9 +131,15 @@ func (r *repository) GroupBounds(unitID int64, t time.Time) (latestEnd *time.Tim
 func listItemsFromPoints(groupID int64, points []models.PatrolPoint) []models.PatrolListItem {
 	items := make([]models.PatrolListItem, 0, len(points))
 	for _, point := range points {
+		areaName := ""
+		if point.Area != nil {
+			areaName = point.Area.Name
+		}
 		items = append(items, models.PatrolListItem{
 			PatrolGroupID:            groupID,
 			PatrolPointID:            point.ID,
+			AreaID:                   point.AreaID,
+			AreaName:                 areaName,
 			Name:                     point.Name,
 			Location:                 point.Location,
 			NFCCode:                  point.NFCCode,
@@ -173,7 +179,7 @@ func (r *repository) SyncGroupItems(groupID int64, points []models.PatrolPoint) 
 	return r.db.Omit(clause.Associations).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "patrol_group_id"}, {Name: "patrol_point_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"name", "location", "nfc_code", "latitude", "longitude",
+			"name", "area_id", "area_name", "location", "nfc_code", "latitude", "longitude",
 			"is_location_match_required", "is_face_validation_required", "updated_at",
 		}),
 	}).Create(&items).Error
@@ -186,6 +192,9 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 
 	if filter.GroupID > 0 {
 		query = query.Where("patrol_list_items.patrol_group_id = ?", filter.GroupID)
+	}
+	if filter.AreaID > 0 {
+		query = query.Where("patrol_list_items.area_id = ?", filter.AreaID)
 	}
 	switch filter.Status {
 	case "scanned":
@@ -208,7 +217,7 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 	err = query.
 		Preload("PatrolGroup", withUnit).
 		Preload("LastScannedByUser", unscoped).
-		Order("patrol_groups.start_at DESC, patrol_list_items.name ASC").
+		Order("patrol_groups.start_at DESC, patrol_list_items.area_name ASC, patrol_list_items.name ASC").
 		Limit(filter.Limit).
 		Offset(filter.Offset()).
 		Find(&items).Error
@@ -219,7 +228,7 @@ func (r *repository) FindItems(filter dto.ItemFilter) (items []models.PatrolList
 func (r *repository) FindItemsByGroup(groupID int64) (items []models.PatrolListItem, err error) {
 	err = r.db.Preload("LastScannedByUser", unscoped).
 		Where("patrol_group_id = ?", groupID).
-		Order("name ASC").
+		Order("area_name ASC, name ASC").
 		Find(&items).Error
 	return items, err
 }
@@ -269,6 +278,11 @@ func (r *repository) scanFilterQuery(filter dto.ScanFilter) *gorm.DB {
 	if filter.PatrolPointID > 0 {
 		query = query.Where("patrol_scans.patrol_point_id = ?", filter.PatrolPointID)
 	}
+	if filter.AreaID > 0 {
+		// The area the point had when it was scanned (copied into the patrol list).
+		query = query.Where("patrol_scans.patrol_list_item_id IN (?)",
+			r.db.Model(&models.PatrolListItem{}).Select("id").Where("area_id = ?", filter.AreaID))
+	}
 	if filter.Condition != "" {
 		query = query.Where("patrol_scans.condition = ?", filter.Condition)
 	}
@@ -302,7 +316,7 @@ func (r *repository) FindScansForExport(filter dto.ScanFilter, limit int, withPh
 
 // FilterNames resolves the ids used in an export filter to names, including
 // deleted records, for the filter summary sheet.
-func (r *repository) FilterNames(unitID, shiftID, patrolPointID, userID int64) (names FilterNames, err error) {
+func (r *repository) FilterNames(unitID, shiftID, patrolPointID, userID, areaID int64) (names FilterNames, err error) {
 	lookup := func(model interface{}, id int64, column string, out *string) error {
 		if id <= 0 {
 			return nil
@@ -310,6 +324,9 @@ func (r *repository) FilterNames(unitID, shiftID, patrolPointID, userID int64) (
 		return r.db.Unscoped().Model(model).Where("id = ?", id).Select(column).Scan(out).Error
 	}
 	if err = lookup(&models.Unit{}, unitID, "name", &names.Unit); err != nil {
+		return
+	}
+	if err = lookup(&models.PatrolArea{}, areaID, "name", &names.Area); err != nil {
 		return
 	}
 	if err = lookup(&models.PatrolShift{}, shiftID, "name", &names.Shift); err != nil {
@@ -388,14 +405,24 @@ func (r *repository) PointSummary(unitID int64, filter dto.PointSummaryFilter) (
 		}
 		return applyGroupFilter(query, "patrol_groups", 0, filter.ShiftID, filter.DateFrom, filter.DateTo)
 	}
+	items := func() *gorm.DB {
+		query := r.db.Table("patrol_list_items AS i").
+			Where("i.deleted_at IS NULL AND i.patrol_group_id IN (?)", groupQuery().Select("patrol_groups.id"))
+		if filter.AreaID > 0 {
+			query = query.Where("i.area_id = ?", filter.AreaID)
+		}
+		return query
+	}
 	if err = groupQuery().Count(&groups).Error; err != nil || groups == 0 {
 		return []dto.PointSummaryRow{}, groups, err
 	}
 
 	// Every point of the groups' patrol lists is listed, also when it was never scanned.
-	err = r.db.Table("patrol_list_items AS i").
+	err = items().
 		Select(`i.patrol_point_id,
 			MAX(i.name) AS name, MAX(i.location) AS location, MAX(i.nfc_code) AS nfc_code,
+			(ARRAY_AGG(i.area_id ORDER BY i.patrol_group_id DESC))[1] AS area_id,
+			(ARRAY_AGG(i.area_name ORDER BY i.patrol_group_id DESC))[1] AS area_name,
 			COUNT(DISTINCT i.patrol_group_id) AS groups,
 			COUNT(DISTINCT s.patrol_group_id) AS scanned_groups,
 			COUNT(s.id) AS total_scans,
@@ -405,9 +432,8 @@ func (r *repository) PointSummary(unitID int64, filter dto.PointSummaryFilter) (
 			MIN(s.scanned_at) AS first_scanned_at,
 			MAX(s.scanned_at) AS last_scanned_at`, models.PatrolConditionNormal, models.PatrolConditionAbnormal).
 		Joins("LEFT JOIN patrol_scans AS s ON s.patrol_list_item_id = i.id AND s.deleted_at IS NULL").
-		Where("i.deleted_at IS NULL AND i.patrol_group_id IN (?)", groupQuery().Select("patrol_groups.id")).
 		Group("i.patrol_point_id").
-		Order("name ASC").
+		Order("area_name ASC, name ASC").
 		Scan(&rows).Error
 	return rows, groups, err
 }

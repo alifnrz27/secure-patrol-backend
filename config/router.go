@@ -112,6 +112,7 @@ func Route(db *gorm.DB) {
 	routes.RoleRouter(api, db)
 	routes.UserRouter(api, db)
 	routes.AppClientRouter(api, db)
+	routes.PatrolAreaRouter(api, db)
 	routes.PatrolPointRouter(api, db)
 	routes.PatrolShiftRouter(api, db)
 	routes.PatrolRouter(api, db)

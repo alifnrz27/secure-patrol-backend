@@ -30,6 +30,7 @@ dari web dengan 403).
 | Riwayat Scan | Tabel dengan filter lengkap, detail scan (foto, peta, jarak, validasi), ekspor CSV |
 | Laporan | Tingkat penyelesaian per hari per shift dan temuan tidak normal untuk rentang tanggal, grafik, ekspor CSV |
 | Unit | Master data unit: kode, nama, lokasi di peta, status aktif (Super-Admin) |
+| Area | Area besar dalam unit (gedung, lantai, parkir) untuk mengelompokkan titik patroli |
 | Titik Patroli | CRUD dengan pemilih lokasi di peta |
 | Pengaturan Shift | CRUD dengan visualisasi timeline 24 jam |
 | Pengguna | CRUD, upload foto wajah, reset password, aktif/nonaktif |
@@ -349,7 +350,7 @@ dari** dan **sampai** (isian awal mengikuti filter halaman). Unduh lewat
 `GET /api/v1/patrol-scans/export?shift_id=&patrol_point_id=&scanned_by=&date_from=&date_to=&include_photos=` menggunakan `apiFetch`
 (butuh signature dan token, jadi tidak bisa memakai link biasa): ambil sebagai blob, lalu simpan dengan nama dari
 header `Content-Disposition`. User pusat juga bisa memilih **Unit** (`unit_id`). File `.xlsx` berisi sheet
-"Riwayat Scan" (kolom Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Unit, Shift, Titik, Lokasi, Kondisi, Catatan, Petugas, Email petugas) dan sheet "Filter". Tampilkan
+"Riwayat Scan" (kolom Waktu scan, Diterima server, Dikirim offline, Tanggal shift, Unit, Shift, Area, Titik, Lokasi, Kondisi, Catatan, Petugas, Email petugas; plus Foto 1–3 jika dengan foto) dan sheet "Filter". Tampilkan
 loading selama unduhan.
 
 - **Tanggal shift dari/sampai wajib.** Rentang maksimal diambil dari `GET /api/v1/settings` (semua role web bisa
@@ -363,8 +364,13 @@ loading selama unduhan.
   `export is limited to 50000 rows, ...`, `an export with photos is limited to 2000 rows, ...`. Tampilkan
   pesan dalam Bahasa Indonesia di dialog.
 
+**Area di monitoring dan laporan** — item daftar patroli, scan (`patrol_point.area_name`), dan rekap per titik
+membawa `area_id` + `area_name` (nama area saat shift berjalan). Kelompokkan daftar titik per area (dengan subtotal),
+dan tambahkan filter **Area** (`area_id`) di Titik per Shift, Riwayat Scan, Export Excel (kolom **Area** setelah
+Shift; sheet Filter berisi baris Area), dan rekap per titik.
+
 **Total patroli per titik** — `GET /api/v1/patrol-point-summary?group_id=` (satu shift pada satu tanggal) atau
-`?shift_id=&date_from=&date_to=` (satu shift di rentang tanggal; unit mengikuti shift). Response: `unit`, `shift`,
+`?shift_id=&date_from=&date_to=` (satu shift di rentang tanggal; unit mengikuti shift), opsional `&area_id=`. Response: `unit`, `shift`,
 `groups`, `totals` (`points`, `scanned_points`, `unscanned_points`, `total_scans`, `abnormal_scans`), dan `items`
 per titik (`name`, `location`, `nfc_code`, `total_scans`, `normal_scans`, `abnormal_scans`, `officers`,
 `scanned_groups`/`groups`, `first_scanned_at`, `last_scanned_at`), termasuk titik yang belum pernah di-scan.
@@ -391,10 +397,25 @@ Error 422 `group_id or shift_id is required`; shift/group unit lain 404.
 - Hapus: hanya unit kosong; 409 `unit still has users or patrol points, move or delete them first` → sarankan
   menonaktifkan. 409 `unit code is already used by another unit` → error di field `code`.
 
+### 10.0a Area — `/api/v1/patrol-areas`
+
+Area membagi titik patroli satu unit ke area besar (gedung, lantai, parkir). Di API namanya `area` karena "group"
+sudah dipakai untuk group patroli (shift per tanggal); label di UI bebas, misalnya "Area".
+
+- Daftar: `GET ?page=&limit=&search=&unit_id=` → `id`, `name`, `description`, `patrol_points_count`.
+- Tambah/ubah (Kepala/Admin Keamanan, JSON): `name` (wajib, maks 100, unik per unit tanpa membedakan huruf besar/kecil),
+  `description` (maks 255). 409 `an area with this name already exists in the unit` → error di field `name`.
+- Hapus: hanya area tanpa titik; 409 `area still has patrol points, move them to another area first` → tampilkan
+  pesan dan tautan ke daftar titik area itu.
+- Pusat (Super-Admin/Manager) hanya melihat.
+
 ### 10.1 Titik Patroli — `/api/v1/patrol-points`
 
-- Daftar: `GET ?page=&limit=&search=&unit_id=` (search nama, lokasi, kode NFC). Tambah/ubah/hapus hanya untuk
-  Kepala/Admin Keamanan; titik otomatis masuk ke unit mereka. Pusat hanya melihat.
+- Daftar: `GET ?page=&limit=&search=&unit_id=&area_id=` (search nama, lokasi, kode NFC). Tambah/ubah/hapus hanya
+  untuk Kepala/Admin Keamanan; titik otomatis masuk ke unit mereka. Pusat hanya melihat.
+- Kolom/field **Area**: `area` (`{id, name}` atau null). Di form, select area dari `GET /api/v1/patrol-areas`
+  (`area_id`, opsional; kosong = tanpa area). `PUT` tanpa `area_id` mengeluarkan titik dari area.
+  422 `area not found in this unit` → error di field area. Filter daftar per area.
 - Form (JSON):
 
   | Field | Aturan |

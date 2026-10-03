@@ -17,11 +17,14 @@ func NewPatrolPointRepository(db *gorm.DB) PatrolPointRepository {
 	return &repository{db: db}
 }
 
-func (r *repository) FindAll(pagination helper.Pagination, unitID int64) (points []models.PatrolPoint, total int64, err error) {
+func (r *repository) FindAll(pagination helper.Pagination, unitID int64, areaID int64) (points []models.PatrolPoint, total int64, err error) {
 	query := r.db.Model(&models.PatrolPoint{})
 
 	if unitID > 0 {
 		query = query.Where("unit_id = ?", unitID)
+	}
+	if areaID > 0 {
+		query = query.Where("area_id = ?", areaID)
 	}
 
 	if pagination.Search != "" {
@@ -34,6 +37,7 @@ func (r *repository) FindAll(pagination helper.Pagination, unitID int64) (points
 	}
 
 	err = query.
+		Preload("Area").
 		Order("name ASC").
 		Limit(pagination.Limit).
 		Offset(pagination.Offset()).
@@ -43,12 +47,12 @@ func (r *repository) FindAll(pagination helper.Pagination, unitID int64) (points
 }
 
 func (r *repository) FindByID(id int64) (point models.PatrolPoint, err error) {
-	err = r.db.First(&point, id).Error
+	err = r.db.Preload("Area").First(&point, id).Error
 	return point, err
 }
 
 func (r *repository) FindByNFCCode(nfcCode string) (point models.PatrolPoint, err error) {
-	err = r.db.Where("nfc_code = ?", nfcCode).First(&point).Error
+	err = r.db.Preload("Area").Where("nfc_code = ?", nfcCode).First(&point).Error
 	return point, err
 }
 
@@ -60,6 +64,7 @@ func (r *repository) Update(point *models.PatrolPoint) error {
 	return r.db.Model(point).
 		Select(
 			"name",
+			"area_id",
 			"location",
 			"nfc_code",
 			"latitude",
@@ -86,4 +91,9 @@ func (r *repository) Delete(point models.PatrolPoint) error {
 
 		return tx.Delete(&models.PatrolPoint{}, point.ID).Error
 	})
+}
+
+func (r *repository) FindArea(id int64) (area models.PatrolArea, err error) {
+	err = r.db.First(&area, id).Error
+	return area, err
 }

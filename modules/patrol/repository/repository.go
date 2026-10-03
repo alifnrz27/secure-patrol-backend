@@ -9,6 +9,7 @@ import (
 // FilterNames are the names of the ids used in a filter, for the export.
 type FilterNames struct {
 	Unit  string
+	Area  string
 	Shift string
 	Point string
 	User  string
@@ -40,7 +41,7 @@ type PatrolRepository interface {
 	FindScanByID(id int64) (models.PatrolScan, error)
 	FindScans(filter dto.ScanFilter) ([]models.PatrolScan, int64, error)
 	FindScansForExport(filter dto.ScanFilter, limit int, withPhotos bool) ([]models.PatrolScan, error)
-	FilterNames(unitID, shiftID, patrolPointID, userID int64) (FilterNames, error)
+	FilterNames(unitID, shiftID, patrolPointID, userID, areaID int64) (FilterNames, error)
 	CreateScan(scan *models.PatrolScan) error
 
 	// FindPhotoPathsSince lists scan photos received since t, newest first.

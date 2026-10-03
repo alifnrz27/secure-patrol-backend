@@ -181,6 +181,8 @@ Keamanan, dan role kustom adalah user **unit**: wajib punya satu unit dan hanya 
 | Tambah/ubah/hapus unit | **web** | ✓ | | | |
 | Lihat patrol point, cari berdasarkan NFC | semua | semua unit | semua unit | unit sendiri | unit sendiri |
 | Tambah/ubah/hapus patrol point | **web** | | | ✓ (unit sendiri) | |
+| Lihat area titik patroli | semua | semua unit | semua unit | unit sendiri | unit sendiri |
+| Tambah/ubah/hapus area | **web** | | | ✓ (unit sendiri) | |
 | Lihat shift, group, daftar patroli | semua | semua unit | semua unit | unit sendiri | unit sendiri |
 | Tambah/ubah/hapus shift | **web** | | | ✓ (unit sendiri) | |
 | Scan NFC patroli | **android/ios** | | | ✓ (titik unit sendiri) | ✓ (titik unit sendiri) |

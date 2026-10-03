@@ -11,6 +11,7 @@ Detail lengkap ada di file yang disebut di setiap bagian; kontrak API ada di `/d
 | 4 | License | Halaman + banner + layar terkunci | Pesan error + banner | Web 10.10 / 12b, Mobile 7b |
 | 5 | Export Excel: rentang wajib + foto | Dialog export | — | Web bagian 9 |
 | 6 | Total patroli per titik per shift | Rekap & laporan | — | Web bagian 9 |
+| 7 | Area titik patroli (gedung/lantai/parkir) | Menu Area + field di titik + filter | Kelompokkan daftar per area | Web 10.0a, Mobile bagian 6 |
 
 ---
 
@@ -99,6 +100,28 @@ termasuk titik yang belum di-scan.
 
 **Web:** tab **Rekap per titik** di detail group (Monitoring) dan rekap per titik di halaman **Laporan**
 (tabel + grafik + CSV; sorot titik yang tidak di-scan).
+
+---
+
+## 7. Area titik patroli
+
+Titik patroli dalam satu unit bisa dikelompokkan ke **area** (gedung, lantai, parkir). Di API bernama `area`
+(karena "group" sudah berarti group patroli shift per tanggal).
+
+- Master area: `GET/POST /api/v1/patrol-areas`, `GET/PUT/DELETE /api/v1/patrol-areas/{id}` — dikelola Kepala/Admin
+  Keamanan unit (web); semua user bisa membaca area unitnya. Field: `name` (unik per unit), `description`,
+  `patrol_points_count`. Hapus hanya jika area kosong (409).
+- Titik patroli: field `area_id` (opsional) dan `area` (`{id, name}` atau null); filter `?area_id=`.
+  422 `area not found in this unit`.
+- Daftar patroli shift, scan, dan rekap per titik membawa `area_id` + `area_name` (nama area **saat shift
+  berjalan**, jadi riwayat tidak berubah jika area diganti nama). Urutan sudah per area lalu nama.
+- Filter `area_id` di: `/patrol-points`, `/patrol-list-items`, `/patrol-scans`, `/patrol-scans/export`,
+  `/patrol-point-summary`.
+- Export Excel: kolom baru **Area** setelah Shift; sheet Filter berisi baris Area.
+
+**Web:** menu **Area** (CRUD), select area di form titik, kolom dan filter area di daftar titik, monitoring
+(kelompok per area + subtotal), riwayat scan, export, dan rekap per titik.
+**Mobile:** daftar patroli di Dashboard dikelompokkan per area dengan progres per area dan chip filter area.
 
 ---
 

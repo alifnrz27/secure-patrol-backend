@@ -60,6 +60,8 @@ type PatrolListItemDTO struct {
 	ID                       int64            `json:"id"`
 	Group                    *GroupSummaryDTO `json:"group,omitempty"`
 	PatrolPointID            int64            `json:"patrol_point_id"`
+	AreaID                   *int64           `json:"area_id"`
+	AreaName                 string           `json:"area_name"`
 	Name                     string           `json:"name"`
 	Location                 string           `json:"location"`
 	NFCCode                  string           `json:"nfc_code"`
@@ -77,6 +79,8 @@ type PatrolListItemDTO struct {
 type ScanPointDTO struct {
 	PatrolListItemID int64  `json:"patrol_list_item_id"`
 	PatrolPointID    int64  `json:"patrol_point_id"`
+	AreaID           *int64 `json:"area_id"`
+	AreaName         string `json:"area_name"`
 	Name             string `json:"name"`
 	Location         string `json:"location"`
 	NFCCode          string `json:"nfc_code"`
@@ -123,6 +127,7 @@ type ScanRequest struct {
 // shift on one date) or a shift over a range of shift dates.
 type PointSummaryFilter struct {
 	GroupID  int64
+	AreaID   int64
 	ShiftID  int64
 	DateFrom string
 	DateTo   string
@@ -131,6 +136,8 @@ type PointSummaryFilter struct {
 // PointSummaryRow is the patrol total of one patrol point.
 type PointSummaryRow struct {
 	PatrolPointID  int64      `json:"patrol_point_id"`
+	AreaID         *int64     `json:"area_id"`
+	AreaName       string     `json:"area_name"`
 	Name           string     `json:"name"`
 	Location       string     `json:"location"`
 	NFCCode        string     `json:"nfc_code"`
@@ -157,6 +164,7 @@ type PointSummaryDTO struct {
 	Unit     UnitSummaryDTO     `json:"unit"`
 	Shift    ShiftSummaryDTO    `json:"shift"`
 	GroupID  *int64             `json:"group_id"`
+	AreaID   *int64             `json:"area_id"`
 	DateFrom string             `json:"date_from"`
 	DateTo   string             `json:"date_to"`
 	Groups   int64              `json:"groups"`

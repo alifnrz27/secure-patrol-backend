@@ -436,7 +436,7 @@ func (s *service) ExportScans(actor Actor, filter dto.ScanFilter, withPhotos boo
 }
 
 func (s *service) FilterNames(filter dto.ScanFilter) (repository.FilterNames, error) {
-	return s.repo.FilterNames(filter.UnitID, filter.ShiftID, filter.PatrolPointID, filter.ScannedBy)
+	return s.repo.FilterNames(filter.UnitID, filter.ShiftID, filter.PatrolPointID, filter.ScannedBy, filter.AreaID)
 }
 
 func (s *service) GetScan(actor Actor, id int64) (models.PatrolScan, error) {
@@ -519,6 +519,9 @@ func (s *service) PointSummary(actor Actor, filter dto.PointSummaryFilter) (dto.
 	result.Unit = dto.UnitSummaryDTO{ID: unitID, Code: unit.Code, Name: unit.Name}
 	result.Shift = dto.ShiftSummaryDTO{ID: shift.ID, Name: shift.Name}
 	result.DateFrom, result.DateTo = filter.DateFrom, filter.DateTo
+	if filter.AreaID > 0 {
+		result.AreaID = &filter.AreaID
+	}
 	result.Groups = groups
 	result.Items = rows
 	for _, row := range rows {

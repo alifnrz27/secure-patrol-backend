@@ -24,7 +24,7 @@ func NewPatrolPointHandler(service service.PatrolPointService, dto dto.PatrolPoi
 func (h *PatrolPointHandler) GetPatrolPoints(c *fiber.Ctx) error {
 	pagination := helper.NewPagination(c)
 
-	points, total, err := h.service.GetPatrolPoints(helper.CurrentScope(c), pagination, int64(c.QueryInt("unit_id", 0)))
+	points, total, err := h.service.GetPatrolPoints(helper.CurrentScope(c), pagination, int64(c.QueryInt("unit_id", 0)), int64(c.QueryInt("area_id", 0)))
 	if err != nil {
 		return h.errorResponse(c, err)
 	}
@@ -80,6 +80,7 @@ func (h *PatrolPointHandler) CreatePatrolPoint(c *fiber.Ctx) error {
 
 	point, err := h.service.CreatePatrolPoint(helper.CurrentScope(c), models.PatrolPoint{
 		Name:                     req.Name,
+		AreaID:                   req.AreaID,
 		Location:                 req.Location,
 		NFCCode:                  req.NFCCode,
 		Latitude:                 *req.Latitude,
@@ -114,6 +115,7 @@ func (h *PatrolPointHandler) UpdatePatrolPoint(c *fiber.Ctx) error {
 
 	point, err := h.service.UpdatePatrolPoint(helper.CurrentScope(c), int64(id), models.PatrolPoint{
 		Name:                     req.Name,
+		AreaID:                   req.AreaID,
 		Location:                 req.Location,
 		NFCCode:                  req.NFCCode,
 		Latitude:                 *req.Latitude,
@@ -152,6 +154,8 @@ func (h *PatrolPointHandler) errorResponse(c *fiber.Ctx, err error) error {
 		code, message = http.StatusNotFound, err.Error()
 	case errors.Is(err, service.ErrUnitRequired):
 		code, message = http.StatusForbidden, err.Error()
+	case errors.Is(err, service.ErrAreaInvalid):
+		code, message = http.StatusUnprocessableEntity, err.Error()
 	case errors.Is(err, service.ErrNFCCodeTaken):
 		code, message = http.StatusConflict, err.Error()
 	default:

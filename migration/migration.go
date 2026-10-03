@@ -10,6 +10,7 @@ import (
 func Migrate(db *gorm.DB) error {
 	migrationModels := []any{
 		&models.Unit{},
+		&models.PatrolArea{},
 		&models.Role{},
 		&models.User{},
 		&models.UserSession{},
@@ -56,6 +57,8 @@ func ensureCaseInsensitiveUniqueIndexes(db *gorm.DB) error {
 	}{
 		{"idx_users_email_lower", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email))"},
 		{"idx_patrol_points_nfc_code_upper", "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_points_nfc_code_upper ON patrol_points (UPPER(nfc_code))"},
+		// Area names are unique within a unit; deleted areas free their name.
+		{"idx_patrol_areas_unit_name", "CREATE UNIQUE INDEX IF NOT EXISTS idx_patrol_areas_unit_name ON patrol_areas (unit_id, LOWER(name)) WHERE deleted_at IS NULL"},
 	}
 
 	for _, index := range indexes {

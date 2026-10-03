@@ -94,6 +94,8 @@ func (d *dto) ToItemDTOs(items []models.PatrolListItem, withGroup bool) []Patrol
 		itemDTO := PatrolListItemDTO{
 			ID:                       item.ID,
 			PatrolPointID:            item.PatrolPointID,
+			AreaID:                   item.AreaID,
+			AreaName:                 item.AreaName,
 			Name:                     item.Name,
 			Location:                 item.Location,
 			NFCCode:                  item.NFCCode,
@@ -137,6 +139,8 @@ func (d *dto) ToScanDTO(scan models.PatrolScan) PatrolScanDTO {
 		PatrolPoint: ScanPointDTO{
 			PatrolListItemID: scan.PatrolListItemID,
 			PatrolPointID:    scan.PatrolPointID,
+			AreaID:           scan.PatrolListItem.AreaID,
+			AreaName:         scan.PatrolListItem.AreaName,
 			Name:             scan.PatrolListItem.Name,
 			Location:         scan.PatrolListItem.Location,
 			NFCCode:          scan.NFCCode,

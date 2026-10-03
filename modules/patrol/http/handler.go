@@ -107,6 +107,7 @@ func (h *PatrolHandler) GetItems(c *fiber.Ctx) error {
 		Pagination: helper.NewPagination(c),
 		UnitID:     helper.UnitFilterFromQuery(c),
 		GroupID:    int64(c.QueryInt("group_id", 0)),
+		AreaID:     int64(c.QueryInt("area_id", 0)),
 		ShiftID:    int64(c.QueryInt("shift_id", 0)),
 		DateFrom:   from,
 		DateTo:     to,
@@ -190,6 +191,7 @@ func (h *PatrolHandler) GetScans(c *fiber.Ctx) error {
 		DateTo:        to,
 		ScannedBy:     int64(c.QueryInt("scanned_by", 0)),
 		PatrolPointID: int64(c.QueryInt("patrol_point_id", 0)),
+		AreaID:        int64(c.QueryInt("area_id", 0)),
 		Condition:     condition,
 	}
 
@@ -215,6 +217,7 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 		UnitID:        helper.UnitFilterFromQuery(c),
 		ShiftID:       int64(c.QueryInt("shift_id", 0)),
 		PatrolPointID: int64(c.QueryInt("patrol_point_id", 0)),
+		AreaID:        int64(c.QueryInt("area_id", 0)),
 		ScannedBy:     int64(c.QueryInt("scanned_by", 0)),
 		DateFrom:      from,
 		DateTo:        to,
@@ -244,6 +247,7 @@ func (h *PatrolHandler) ExportScans(c *fiber.Ctx) error {
 		ExportedAt:    now,
 		ExportedBy:    exportedBy,
 		Unit:          names.Unit,
+		Area:          names.Area,
 		Shift:         names.Shift,
 		Point:         names.Point,
 		Officer:       names.User,
@@ -311,6 +315,7 @@ func (h *PatrolHandler) GetPointSummary(c *fiber.Ctx) error {
 
 	summary, err := h.service.PointSummary(actor(c), dto.PointSummaryFilter{
 		GroupID:  int64(c.QueryInt("group_id", 0)),
+		AreaID:   int64(c.QueryInt("area_id", 0)),
 		ShiftID:  int64(c.QueryInt("shift_id", 0)),
 		DateFrom: from,
 		DateTo:   to,

@@ -18,8 +18,20 @@ func NewPatrolPointService(repo repository.PatrolPointRepository) PatrolPointSer
 	return &service{repo: repo}
 }
 
-func (s *service) GetPatrolPoints(scope helper.Scope, pagination helper.Pagination, unitID int64) ([]models.PatrolPoint, int64, error) {
-	return s.repo.FindAll(pagination, scope.UnitFilter(unitID))
+func (s *service) GetPatrolPoints(scope helper.Scope, pagination helper.Pagination, unitID int64, areaID int64) ([]models.PatrolPoint, int64, error) {
+	return s.repo.FindAll(pagination, scope.UnitFilter(unitID), areaID)
+}
+
+// checkArea makes sure an area belongs to the point's unit.
+func (s *service) checkArea(areaID *int64, unitID int64) error {
+	if areaID == nil {
+		return nil
+	}
+	area, err := s.repo.FindArea(*areaID)
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && area.UnitID != unitID) {
+		return ErrAreaInvalid
+	}
+	return err
 }
 
 func (s *service) GetPatrolPointByID(scope helper.Scope, id int64) (models.PatrolPoint, error) {
@@ -59,6 +71,9 @@ func (s *service) CreatePatrolPoint(scope helper.Scope, point models.PatrolPoint
 	if err := s.checkNFCCodeAvailable(point.NFCCode, 0); err != nil {
 		return point, err
 	}
+	if err := s.checkArea(point.AreaID, point.UnitID); err != nil {
+		return point, err
+	}
 
 	point.CreatedBy = &actorID
 	point.UpdatedBy = &actorID
@@ -70,7 +85,7 @@ func (s *service) CreatePatrolPoint(scope helper.Scope, point models.PatrolPoint
 		return point, err
 	}
 
-	return point, nil
+	return s.GetPatrolPointByID(scope, point.ID)
 }
 
 func (s *service) UpdatePatrolPoint(scope helper.Scope, id int64, input models.PatrolPoint) (models.PatrolPoint, error) {
@@ -90,7 +105,13 @@ func (s *service) UpdatePatrolPoint(scope helper.Scope, id int64, input models.P
 		}
 	}
 
+	if err := s.checkArea(input.AreaID, point.UnitID); err != nil {
+		return point, err
+	}
+
 	point.Name = strings.TrimSpace(input.Name)
+	point.AreaID = input.AreaID
+	point.Area = nil
 	point.Location = strings.TrimSpace(input.Location)
 	point.NFCCode = nfcCode
 	point.Latitude = input.Latitude
